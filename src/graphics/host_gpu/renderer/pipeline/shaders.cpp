@@ -4,6 +4,7 @@
 #include "gpu_blit_shaders/gpu_mesh_indirect_spv.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/gpuBreadcrumbs.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptorHeap.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
@@ -387,6 +388,13 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 		     ", ds 0x%016" PRIx64 ", ps 0x%016" PRIx64 "\n",
 		     vk::to_string(result).c_str(), mesh ? "ms" : "vs", hash(0), hash(1), hash(2), hash(3));
 	}
+	if (GpuBreadcrumbs::Enabled()) {
+		const auto hash = [&](size_t stage) {
+			return stages[stage] != nullptr ? stages[stage]->info.shader_hash : uint64_t {0};
+		};
+		GpuBreadcrumbs::RegisterPipeline(pipeline.pipeline, mesh ? "ms/hs/ds/ps" : "vs/hs/ds/ps",
+		                                 hash(0), hash(1), hash(2), hash(3));
+	}
 
 	graphics.device.destroyShaderModule(tess_control_shader_module, nullptr);
 	graphics.device.destroyShaderModule(tess_eval_shader_module, nullptr);
@@ -426,6 +434,7 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 		EXIT("vkCreateComputePipelines failed: %s, cs 0x%016" PRIx64 "\n", vk::to_string(result).c_str(),
 		     module.info.shader_hash);
 	}
+	GpuBreadcrumbs::RegisterPipeline(pipeline.pipeline, "cs", module.info.shader_hash);
 }
 
 } // namespace Libs::Graphics

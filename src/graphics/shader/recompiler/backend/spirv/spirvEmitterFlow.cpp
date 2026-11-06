@@ -506,7 +506,28 @@ uint32_t EmitWqmU64(EmitterState& state, uint32_t value) {
 	                          ConstantU64(state, 0x1111111111111111ull));
 	state.builder.AddFunction(spv::OpIMul, TypeU64(state), result, quad_bits,
 	                          ConstantU64(state, 15));
-	return result;
+	if (state.program.stage != ShaderType::Pixel || state.lane_count != 1) {
+		return result;
+	}
+	// The helper lanes WQM adds are not active in the host's subgroup operations on every driver
+	// (AMD runs them outside ballots). A guest loop that waits for every EXEC lane to take part in
+	// a ballot (a waterfall) then never ends and hangs the GPU: keep only the lanes the host runs.
+	state.builder.RequireCapability(spv::CapabilityGroupNonUniform);
+	state.builder.RequireCapability(spv::CapabilityGroupNonUniformBallot);
+	const auto ballot = state.builder.AllocateId();
+	const auto low    = state.builder.AllocateId();
+	const auto high   = state.builder.AllocateId();
+	const auto pair   = state.builder.AllocateId();
+	const auto active = state.builder.AllocateId();
+	const auto masked = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpGroupNonUniformBallot, TypeU32Vector(state, 4), ballot,
+	                          ConstantU32(state, spv::ScopeSubgroup), ConstantBool(state, true));
+	state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), low, ballot, 0u);
+	state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), high, ballot, 1u);
+	state.builder.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 2), pair, low, high);
+	state.builder.AddFunction(spv::OpBitcast, TypeU64(state), active, pair);
+	state.builder.AddFunction(spv::OpBitwiseAnd, TypeU64(state), masked, result, active);
+	return masked;
 }
 
 void EmitSetAttribute(ValueEmitContext& ctx, const IR::Inst& inst) {

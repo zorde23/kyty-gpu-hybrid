@@ -30,6 +30,8 @@ private:
 	bool m_previous;
 };
 
+// Called once before a fatal error is reported (GPU hang breadcrumbs).
+extern void (*g_fatal_report_hook)();
 [[noreturn]] void DbgExitHandler(char const* file, int line, std::string_view text);
 [[noreturn]] void DbgExitIfHandler(char const* expr, char const* file, int line);
 [[noreturn]] void DbgNotImplementedHandler(char const* expr, char const* file, int line);

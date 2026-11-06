@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/spscQueue.h"
+#include "graphics/host_gpu/renderer/gpuBreadcrumbs.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <cstddef>
@@ -232,6 +233,7 @@ public:
 	}
 
 	void bindPipeline(vk::PipelineBindPoint bind_point, vk::Pipeline pipeline) const {
+		GpuBreadcrumbs::NoteBind(bind_point, pipeline);
 		if (m_stream == nullptr) {
 			m_direct.bindPipeline(bind_point, pipeline);
 			return;
@@ -290,6 +292,7 @@ public:
 	}
 
 	void dispatch(uint32_t x, uint32_t y, uint32_t z) const {
+		const CrumbScope crumb(*this, true, "dispatch");
 		if (m_stream == nullptr) {
 			m_direct.dispatch(x, y, z);
 			return;
@@ -327,6 +330,7 @@ public:
 	}
 	void dispatchBase(uint32_t base_x, uint32_t base_y, uint32_t base_z, uint32_t x, uint32_t y,
 	                  uint32_t z) const {
+		const CrumbScope crumb(*this, true, "dispatchBase");
 		if (m_stream == nullptr) {
 			m_direct.dispatchBase(base_x, base_y, base_z, x, y, z);
 			return;
@@ -335,6 +339,7 @@ public:
 		    [=](vk::CommandBuffer c) { c.dispatchBase(base_x, base_y, base_z, x, y, z); });
 	}
 	void dispatchIndirect(vk::Buffer buffer, vk::DeviceSize offset) const {
+		const CrumbScope crumb(*this, true, "dispatchIndirect");
 		if (m_stream == nullptr) {
 			m_direct.dispatchIndirect(buffer, offset);
 			return;
@@ -343,6 +348,7 @@ public:
 	}
 	void draw(uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex,
 	          uint32_t first_instance) const {
+		const CrumbScope crumb(*this, false, "draw");
 		if (m_stream == nullptr) {
 			m_direct.draw(vertex_count, instance_count, first_vertex, first_instance);
 			return;
@@ -353,6 +359,7 @@ public:
 	}
 	void drawIndexed(uint32_t index_count, uint32_t instance_count, uint32_t first_index,
 	                 int32_t vertex_offset, uint32_t first_instance) const {
+		const CrumbScope crumb(*this, false, "drawIndexed");
 		if (m_stream == nullptr) {
 			m_direct.drawIndexed(index_count, instance_count, first_index, vertex_offset,
 			                     first_instance);
@@ -364,6 +371,7 @@ public:
 	}
 	void drawIndirect(vk::Buffer buffer, vk::DeviceSize offset, uint32_t draw_count,
 	                  uint32_t stride) const {
+		const CrumbScope crumb(*this, false, "drawIndirect");
 		if (m_stream == nullptr) {
 			m_direct.drawIndirect(buffer, offset, draw_count, stride);
 			return;
@@ -373,6 +381,7 @@ public:
 	}
 	void drawIndexedIndirect(vk::Buffer buffer, vk::DeviceSize offset, uint32_t draw_count,
 	                         uint32_t stride) const {
+		const CrumbScope crumb(*this, false, "drawIndexedIndirect");
 		if (m_stream == nullptr) {
 			m_direct.drawIndexedIndirect(buffer, offset, draw_count, stride);
 			return;
@@ -383,6 +392,7 @@ public:
 	void drawIndirectCount(vk::Buffer buffer, vk::DeviceSize offset, vk::Buffer count_buffer,
 	                       vk::DeviceSize count_offset, uint32_t max_draw_count,
 	                       uint32_t stride) const {
+		const CrumbScope crumb(*this, false, "drawIndirectCount");
 		if (m_stream == nullptr) {
 			m_direct.drawIndirectCount(buffer, offset, count_buffer, count_offset, max_draw_count,
 			                           stride);
@@ -395,6 +405,7 @@ public:
 	void drawIndexedIndirectCount(vk::Buffer buffer, vk::DeviceSize offset,
 	                              vk::Buffer count_buffer, vk::DeviceSize count_offset,
 	                              uint32_t max_draw_count, uint32_t stride) const {
+		const CrumbScope crumb(*this, false, "drawIndexedIndirectCount");
 		if (m_stream == nullptr) {
 			m_direct.drawIndexedIndirectCount(buffer, offset, count_buffer, count_offset,
 			                                  max_draw_count, stride);
@@ -406,6 +417,7 @@ public:
 		});
 	}
 	void drawMeshTasksEXT(uint32_t x, uint32_t y, uint32_t z) const {
+		const CrumbScope crumb(*this, false, "drawMeshTasksEXT");
 		if (m_stream == nullptr) {
 			m_direct.drawMeshTasksEXT(x, y, z);
 			return;
@@ -636,6 +648,36 @@ public:
 	}
 
 private:
+	// GPU hang breadcrumbs around one draw or dispatch (gpuBreadcrumbs.h); nothing when off.
+	void Crumb(uint32_t id, bool begin) const {
+		if (m_stream == nullptr) {
+			GpuBreadcrumbs::Write(m_direct, id, begin);
+			return;
+		}
+		m_stream->Record([=](vk::CommandBuffer c) { GpuBreadcrumbs::Write(c, id, begin); });
+	}
+	class CrumbScope {
+	public:
+		CrumbScope(const CommandRecorder& recorder, bool compute, const char* what)
+		    : m_recorder(recorder),
+		      m_id(GpuBreadcrumbs::Enabled() ? GpuBreadcrumbs::Next(compute, what) : 0) {
+			if (m_id != 0) {
+				m_recorder.Crumb(m_id, true);
+			}
+		}
+		~CrumbScope() {
+			if (m_id != 0) {
+				m_recorder.Crumb(m_id, false);
+			}
+		}
+		CrumbScope(const CrumbScope&)            = delete;
+		CrumbScope& operator=(const CrumbScope&) = delete;
+
+	private:
+		const CommandRecorder& m_recorder;
+		uint32_t               m_id;
+	};
+
 	vk::CommandBuffer m_direct = nullptr;
 	CommandStream*    m_stream = nullptr;
 };

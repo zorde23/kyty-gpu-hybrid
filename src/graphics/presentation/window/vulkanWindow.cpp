@@ -7,6 +7,7 @@
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/gpuBreadcrumbs.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/vulkanCommon.h"
@@ -26,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
 #include <memory>
@@ -407,6 +409,9 @@ static vk::Device VulkanCreateDevice(GraphicContext&          graphics,
 	       feedback_layout, feedback_dynamic, provoking_vertex, maintenance8, shader_clock,
 	       image_atomic_int64, conditional_rendering, barycentric] = supported;
 	graphics.memory_budget_ext_enabled = add(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+	// GPU hang breadcrumbs (renderer/gpuBreadcrumbs.cpp), only when asked for.
+	graphics.buffer_marker_amd_enabled =
+	    std::getenv("KYTY_GPU_BREADCRUMBS") != nullptr && add(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
 	add(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
 	const bool extended_dynamic_state = add(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
 	if (!add(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME)) {
@@ -1004,6 +1009,7 @@ void WindowContext::CreateVulkan() {
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(graphic_ctx.device);
 	graphic_ctx.device.getQueue(graphic_ctx.queue_family, 0, &graphic_ctx.queue);
 	EXIT_IF(graphic_ctx.queue == nullptr);
+	GpuBreadcrumbs::Init(graphic_ctx);
 	if (graphic_ctx.readback_family != static_cast<uint32_t>(-1)) {
 		graphic_ctx.device.getQueue(graphic_ctx.readback_family, 0, &graphic_ctx.readback_queue);
 	}

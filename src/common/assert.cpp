@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <fmt/format.h>
 #include <string>
+#include <utility>
 
 namespace Common {
 
@@ -29,8 +30,13 @@ static void ThrowIfSoft([[maybe_unused]] const std::string& text) {
 #endif
 }
 
+void (*g_fatal_report_hook)() = nullptr;
+
 [[noreturn]] static void DbgReport(const char* title, std::string_view text, const char* file,
                                    int line) {
+	if (auto* hook = std::exchange(g_fatal_report_hook, nullptr)) {
+		hook();
+	}
 	Log::WriteToConsoleAndLog(fmt::format("--- Build ---\n{}\n{}\n{} in {}:{}\n", KYTY_BUILD_LABEL,
 	                                      title, text, file, line));
 	Subsystems::EmergencyShutdownActive();
