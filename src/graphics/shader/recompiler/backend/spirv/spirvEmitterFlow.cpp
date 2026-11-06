@@ -3,6 +3,7 @@
 #include "common/logging/log.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <optional>
@@ -148,7 +149,11 @@ uint32_t EmitDppWriteCondition(ValueEmitContext& ctx, const IR::DppMoveFlags& fl
 	// Only row shifts (0x101-0x10f, 0x111-0x11f) can vacate a lane; other controls always read one.
 	const bool row_shift = flags.control > 0x100u && flags.control < 0x120u &&
 	                       flags.control != 0x110u;
-	if (flags.bound_control || (flags.fetch_inactive && !row_shift)) {
+	// A pixel shader's quad_perm reads its quad, whose helper lanes WQM made live; the EXEC an
+	// active lane holds leaves helpers out (EmitWqmU64), so their source bit cannot be tested.
+	const bool pixel_quad_perm = state.program.stage == ShaderType::Pixel &&
+	                             state.lane_count == 1 && !flags.dpp8 && flags.control <= 0xffu;
+	if (flags.bound_control || (flags.fetch_inactive && !row_shift) || pixel_quad_perm) {
 		return writable;
 	}
 	// Without BOUND_CTRL, a vacated source or, without FI, an EXEC-disabled one disables the write.
@@ -506,12 +511,15 @@ uint32_t EmitWqmU64(EmitterState& state, uint32_t value) {
 	                          ConstantU64(state, 0x1111111111111111ull));
 	state.builder.AddFunction(spv::OpIMul, TypeU64(state), result, quad_bits,
 	                          ConstantU64(state, 15));
-	if (state.program.stage != ShaderType::Pixel || state.lane_count != 1) {
+	if (state.program.stage != ShaderType::Pixel || state.lane_count != 1 ||
+	    state.helper_invocation_variable == 0) {
 		return result;
 	}
 	// The helper lanes WQM adds are not active in the host's subgroup operations on every driver
 	// (AMD runs them outside ballots). A guest loop that waits for every EXEC lane to take part in
-	// a ballot (a waterfall) then never ends and hangs the GPU: keep only the lanes the host runs.
+	// a ballot (a waterfall) then never ends and hangs the GPU: the mask the active lanes hold keeps
+	// only the lanes the host runs. Helper lanes keep the whole mask, so they stay live for
+	// derivatives (scalars are per invocation here).
 	state.builder.RequireCapability(spv::CapabilityGroupNonUniform);
 	state.builder.RequireCapability(spv::CapabilityGroupNonUniformBallot);
 	const auto ballot = state.builder.AllocateId();
@@ -527,7 +535,8 @@ uint32_t EmitWqmU64(EmitterState& state, uint32_t value) {
 	state.builder.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 2), pair, low, high);
 	state.builder.AddFunction(spv::OpBitcast, TypeU64(state), active, pair);
 	state.builder.AddFunction(spv::OpBitwiseAnd, TypeU64(state), masked, result, active);
-	return masked;
+	const auto helper = EmitNative<spv::OpLoad, IR::Type::U1>(state, state.helper_invocation_variable);
+	return EmitNative<spv::OpSelect, IR::Type::U64>(state, helper, result, masked);
 }
 
 void EmitSetAttribute(ValueEmitContext& ctx, const IR::Inst& inst) {
@@ -807,6 +816,32 @@ uint32_t EmitUndefU1(EmitterState& state, const IR::Inst& inst) {
 uint32_t EmitDppMoveU32(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto&      state    = ctx.state;
 	const auto flags    = inst.Flags<IR::DppMoveFlags>();
+	if (state.program.stage == ShaderType::Pixel && state.lane_count == 1 && !flags.dpp8 &&
+	    flags.control <= 0xffu) {
+		// quad_perm in a pixel shader feeds derivatives: a generic shuffle does not read helper
+		// lanes on every driver (AMD), quad operations do. Each lane picks one of the quad's four.
+		state.builder.RequireCapability(spv::CapabilityGroupNonUniformQuad);
+		const auto value = ctx.Arg(inst, 0);
+		const auto scope = ConstantU32(state, spv::ScopeSubgroup);
+		std::array<uint32_t, 4> quad {};
+		for (uint32_t i = 0; i < 4; ++i) {
+			quad[i] = EmitNative<spv::OpGroupNonUniformQuadBroadcast, IR::Type::U32>(
+			    state, scope, value, ConstantU32(state, i));
+		}
+		const auto lane = Binary(state, spv::OpBitwiseAnd, TypeU32(state),
+		                         EmitSubgroupLocalInvocationId(state), ConstantU32(state, 3));
+		const auto source = EmitNative<spv::OpBitFieldUExtract, IR::Type::U32>(
+		    state, ConstantU32(state, flags.control),
+		    Binary(state, spv::OpIMul, TypeU32(state), lane, ConstantU32(state, 2)),
+		    ConstantU32(state, 2));
+		auto picked = quad[0];
+		for (uint32_t i = 1; i < 4; ++i) {
+			picked = EmitNative<spv::OpSelect, IR::Type::U32>(
+			    state, Binary(state, spv::OpIEqual, TypeBool(state), source, ConstantU32(state, i)),
+			    quad[i], picked);
+		}
+		return picked;
+	}
 	const auto target   = EmitDppTargetLane(state, flags);
 	const auto shuffled = ctx.Shuffle(inst, 0, target.lane);
 	if (flags.fetch_inactive) {
