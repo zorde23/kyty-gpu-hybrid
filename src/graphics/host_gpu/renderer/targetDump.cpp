@@ -18,8 +18,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace Libs::Graphics::TargetDump {
@@ -30,7 +32,9 @@ enum class State : uint32_t { Idle, Requested, Capturing };
 
 bool                  g_enabled  = false;
 uint32_t              g_at_flip  = 0;
-uint32_t              g_max      = 4000;
+uint32_t              g_max      = 3500; // a heavy title frame has ~3200 draws
+uint32_t              g_each_from = 1;   // draws dumped one by one (KYTY_TARGET_DUMP_DRAWS=a-b)
+uint32_t              g_each_to   = 0;
 std::atomic<State>    g_state {State::Idle};
 std::atomic<uint32_t> g_flips {0};
 uint32_t              g_frame    = 0;
@@ -250,6 +254,12 @@ void Init() {
 	if (const char* max = std::getenv("KYTY_TARGET_DUMP_MAX")) {
 		g_max = static_cast<uint32_t>(std::strtoul(max, nullptr, 10));
 	}
+	if (const char* draws = std::getenv("KYTY_TARGET_DUMP_DRAWS")) {
+		char* end   = nullptr;
+		g_each_from = static_cast<uint32_t>(std::strtoul(draws, &end, 10));
+		g_each_to   = end != nullptr && *end == '-' ? static_cast<uint32_t>(std::strtoul(end + 1, nullptr, 10))
+		                                            : g_each_from;
+	}
 	GpuBreadcrumbs::TrackPipelines();
 	Log::WriteToConsoleAndLog(fmt::format("Target dump: on (F9{})\n",
 	                                      g_at_flip != 0 ? fmt::format(", at flip {}", g_at_flip) : ""));
@@ -274,27 +284,56 @@ void OnFlip() noexcept {
 	if (g_at_flip != 0 && flips == g_at_flip) {
 		RequestCapture();
 	}
-	auto state = g_state.load();
-	if (state == State::Requested) {
-		g_state.store(State::Capturing);
-	} else if (state == State::Capturing) {
-		g_state.store(State::Idle);
-	}
+	// The capture ends after g_max draws, not at a flip: the dump slows the GPU work down while
+	// the presentation keeps flipping.
+	auto expected = State::Requested;
+	g_state.compare_exchange_strong(expected, State::Capturing);
 }
+
+namespace {
+
+struct Pending {
+	uint32_t             draw = 0;
+	uint32_t             slot = 0;
+	uint32_t             flip = 0;
+	std::string          format;
+	uint32_t             guest_width  = 0;
+	uint32_t             guest_height = 0;
+	uint64_t             address      = 0;
+	std::string          shaders;
+	uint32_t             width  = 0;
+	uint32_t             height = 0;
+	std::vector<uint8_t> pixels;
+};
+
+using TargetKey = std::tuple<uint64_t, uint32_t, uint32_t>; // guest address, mip, layer
+std::map<TargetKey, Pending> g_pending; // the last draw of each target of the current pass
+
+void Write(const Pending& p, char prefix) {
+	const auto name = fmt::format("{}{:05}_t{}.bmp", prefix, p.draw, p.slot);
+	WriteBmp(g_folder / name, p.width, p.height, p.pixels);
+	std::fprintf(g_index, "%u,%u,%u,%s,%u,%u,0x%llx,%s,%s\n", p.draw, p.slot, p.flip, p.format.c_str(),
+	             p.guest_width, p.guest_height, static_cast<unsigned long long>(p.address), name.c_str(),
+	             p.shaders.c_str());
+}
+
+void FlushExcept(const std::vector<TargetKey>& keep) {
+	for (auto it = g_pending.begin(); it != g_pending.end();) {
+		if (std::find(keep.begin(), keep.end(), it->first) == keep.end()) {
+			Write(it->second, 'p');
+			it = g_pending.erase(it);
+		} else {
+			++it;
+		}
+	}
+	std::fflush(g_index);
+}
+
+} // namespace
 
 void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
                vk::Pipeline pipeline) {
-	if (!g_enabled) {
-		return;
-	}
-	const auto current = g_state.load(std::memory_order_acquire);
-	if (current != State::Capturing) {
-		if (g_index != nullptr) {
-			std::fclose(g_index);
-			g_index = nullptr;
-			Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} done, {} draws in {}\n",
-			                                      g_frame, g_draw, g_folder.string()));
-		}
+	if (!g_enabled || g_state.load(std::memory_order_acquire) != State::Capturing) {
 		return;
 	}
 	if (g_index == nullptr) {
@@ -307,16 +346,15 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 			g_state.store(State::Idle);
 			return;
 		}
-		std::fprintf(g_index, "draw,slot,format,width,height,guest_address,file,shaders\n");
-		Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} started\n", g_frame));
+		std::fprintf(g_index, "draw,slot,flip,format,width,height,guest_address,file,shaders\n");
+		Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} started ({} draws)\n", g_frame, g_max));
 	}
 	const uint32_t draw = ++g_draw;
-	if (draw > g_max) {
-		return;
-	}
 	auto& graphics = context.GetGraphics();
 	auto& cache    = context.GetTextureCache();
 	const auto shaders = GpuBreadcrumbs::Describe(pipeline);
+	std::vector<TargetKey> targets;
+	std::vector<Pending>   current;
 	for (uint32_t i = 0; i < state.color_count; ++i) {
 		const auto& color = state.colors[i];
 		if (!color.image_id) {
@@ -330,7 +368,7 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 		const auto layer  = color.desc.view_info.base_layer;
 		if (!info || image.backing.samples > 1 ||
 		    !EnsureStaging(graphics, static_cast<vk::DeviceSize>(extent.width) * extent.height * info->bytes)) {
-			std::fprintf(g_index, "%u,%u,%d,%u,%u,0x%llx,,%s\n", draw, color.target_slot,
+			std::fprintf(g_index, "%u,%u,%u,%d,%u,%u,0x%llx,,%s\n", draw, color.target_slot, g_flips.load(),
 			             static_cast<int>(format), extent.width, extent.height,
 			             static_cast<unsigned long long>(image.info.data.address), shaders.c_str());
 			continue;
@@ -349,26 +387,51 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 		auto& scheduler = context.GetCommandScheduler();
 		scheduler.Wait(scheduler.CurrentTick());
 
-		const uint32_t step   = extent.width > 1280 ? 2u : 1u;
-		const uint32_t width  = (extent.width + step - 1) / step;
-		const uint32_t height = (extent.height + step - 1) / step;
-		const uint32_t row    = (width * 3u + 3u) & ~3u;
-		std::vector<uint8_t> pixels(static_cast<size_t>(row) * height);
+		const uint32_t step = std::max(1u, (extent.width + 1279u) / 1280u);
+		Pending        p;
+		p.draw         = draw;
+		p.slot         = color.target_slot;
+		p.flip         = g_flips.load();
+		p.format       = vk::to_string(format);
+		p.guest_width  = extent.width;
+		p.guest_height = extent.height;
+		p.address      = image.info.data.address;
+		p.shaders      = shaders;
+		p.width        = (extent.width + step - 1) / step;
+		p.height       = (extent.height + step - 1) / step;
+		const uint32_t row = (p.width * 3u + 3u) & ~3u;
+		p.pixels.resize(static_cast<size_t>(row) * p.height);
 		const auto* source = static_cast<const uint8_t*>(g_mapped);
-		for (uint32_t y = 0; y < height; ++y) {
-			for (uint32_t x = 0; x < width; ++x) {
-				const size_t texel = (static_cast<size_t>(y * step) * extent.width + x * step) * info->bytes;
-				Convert(format, source + texel, &pixels[static_cast<size_t>(y) * row + x * 3u]);
+		for (uint32_t y = 0; y < p.height; ++y) {
+			for (uint32_t x = 0; x < p.width; ++x) {
+				const size_t texel =
+				    (static_cast<size_t>(y * step) * extent.width + x * step) * info->bytes;
+				Convert(format, source + texel, &p.pixels[static_cast<size_t>(y) * row + x * 3u]);
 			}
 		}
-		const auto name = fmt::format("d{:05}_t{}.bmp", draw, color.target_slot);
-		WriteBmp(g_folder / name, width, height, pixels);
-		std::fprintf(g_index, "%u,%u,%s,%u,%u,0x%llx,%s,%s\n", draw, color.target_slot,
-		             vk::to_string(format).c_str(), extent.width, extent.height,
-		             static_cast<unsigned long long>(image.info.data.address), name.c_str(),
-		             shaders.c_str());
+		if (draw >= g_each_from && draw <= g_each_to) {
+			Write(p, 'd');
+		}
+		targets.emplace_back(p.address, mip, layer);
+		current.push_back(std::move(p));
 	}
-	std::fflush(g_index);
+	// A draw to other targets ends the pass of the targets it does not use: their last draw's
+	// image is final for that pass.
+	// Depth-only draws (shadow maps, prepasses) leave the color passes open.
+	if (!targets.empty()) {
+		FlushExcept(targets);
+	}
+	for (size_t i = 0; i < current.size(); ++i) {
+		g_pending[targets[i]] = std::move(current[i]);
+	}
+	if (draw >= g_max) {
+		FlushExcept({});
+		std::fclose(g_index);
+		g_index = nullptr;
+		g_state.store(State::Idle);
+		Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} done, {} draws in {}\n", g_frame,
+		                                      draw, g_folder.string()));
+	}
 }
 
 } // namespace Libs::Graphics::TargetDump
