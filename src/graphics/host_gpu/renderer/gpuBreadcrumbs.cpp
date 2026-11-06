@@ -27,6 +27,7 @@ struct Record {
 constexpr uint32_t RingSize = 1u << 16;
 
 bool                    g_enabled = false;
+bool                    g_track   = false;
 vk::Buffer              g_buffer  = nullptr;
 vk::DeviceMemory        g_memory  = nullptr;
 volatile uint32_t*      g_markers = nullptr; // [0] last started id, [1] last ended id
@@ -109,9 +110,23 @@ bool Enabled() noexcept {
 	return g_enabled;
 }
 
+void TrackPipelines() noexcept {
+	g_track = true;
+}
+
+std::string Describe(vk::Pipeline pipeline) {
+	std::lock_guard lock(g_pipelines_mutex);
+	const auto      it = g_pipelines.find(static_cast<VkPipeline>(pipeline));
+	if (it == g_pipelines.end()) {
+		return "unknown";
+	}
+	return fmt::format("{} {:016x} {:016x} {:016x} {:016x}", it->second.kind, it->second.hashes[0],
+	                   it->second.hashes[1], it->second.hashes[2], it->second.hashes[3]);
+}
+
 void RegisterPipeline(vk::Pipeline pipeline, const char* kind, uint64_t h0, uint64_t h1,
                       uint64_t h2, uint64_t h3) {
-	if (!g_enabled) {
+	if (!g_enabled && !g_track) {
 		return;
 	}
 	std::lock_guard lock(g_pipelines_mutex);

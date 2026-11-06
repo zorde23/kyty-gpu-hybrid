@@ -388,7 +388,7 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 		     ", ds 0x%016" PRIx64 ", ps 0x%016" PRIx64 "\n",
 		     vk::to_string(result).c_str(), mesh ? "ms" : "vs", hash(0), hash(1), hash(2), hash(3));
 	}
-	if (GpuBreadcrumbs::Enabled()) {
+	{
 		const auto hash = [&](size_t stage) {
 			return stages[stage] != nullptr ? stages[stage]->info.shader_hash : uint64_t {0};
 		};

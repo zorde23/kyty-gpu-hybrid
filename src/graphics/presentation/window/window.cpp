@@ -13,6 +13,7 @@
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/presentation/performanceOverlay.h"
 #include "graphics/presentation/renderDoc.h"
@@ -224,6 +225,11 @@ static void GameEventKeyboard(const EventKeyboard& key) {
 			case SDLK_F1:
 				if (!key.repeat) {
 					RenderDocRequestCapture();
+				}
+				break;
+			case SDLK_F9:
+				if (!key.repeat) {
+					TargetDump::RequestCapture();
 				}
 				break;
 			case SDLK_F11:

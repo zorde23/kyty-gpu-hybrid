@@ -4,6 +4,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <cstdint>
+#include <string>
 
 namespace Libs::Graphics {
 struct GraphicContext;
@@ -18,6 +19,10 @@ namespace Libs::Graphics::GpuBreadcrumbs {
 void Init(GraphicContext& graphics);
 [[nodiscard]] bool Enabled() noexcept;
 
+// Keeps the shader hashes of pipelines without the breadcrumbs (render target dumps).
+void TrackPipelines() noexcept;
+// "kind h0 h1 h2 h3" of a registered pipeline, or "unknown".
+[[nodiscard]] std::string Describe(vk::Pipeline pipeline);
 // Shader hashes of a pipeline, for the report (any thread).
 void RegisterPipeline(vk::Pipeline pipeline, const char* kind, uint64_t h0, uint64_t h1 = 0,
                       uint64_t h2 = 0, uint64_t h3 = 0);

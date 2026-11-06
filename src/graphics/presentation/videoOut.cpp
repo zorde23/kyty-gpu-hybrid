@@ -19,6 +19,7 @@
 #include "graphics/presentation/performanceOverlay.h"
 #include "graphics/presentation/presenter.h"
 #include "graphics/presentation/renderDoc.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "kernel/pthread.h"
 #include "libs/errno.h"
 #include "libs/hmd2.h"
@@ -1184,6 +1185,7 @@ bool FlipQueue::Flip() {
 	unlock_ports();
 	if (due) {
 		Graphics::RenderDocOnGuestFlip(m_presenter.Renderer());
+		Graphics::TargetDump::OnFlip();
 		if (Config::GraphicsDebugDumpEnabled() &&
 		    Config::GetPrintfDirection() != Config::LogDirection::Silent) {
 			LOGF("Flip done: %d\n", requests[0].index);

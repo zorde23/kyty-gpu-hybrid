@@ -18,6 +18,7 @@
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
 #include "graphics/host_gpu/renderer/debug.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/meshDrawSplit.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
@@ -1872,6 +1873,7 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 		m_shader_write_queue    = m_guest_queue;
 		m_shader_write_deferred = true;
 	}
+	TargetDump::AfterDraw(m_context, buffer, state, pipeline.pipeline);
 }
 
 // Vulkan offsets for a prepared draw, or nullopt when its indirect records need the CPU:
