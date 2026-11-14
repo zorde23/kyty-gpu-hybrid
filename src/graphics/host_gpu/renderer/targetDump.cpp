@@ -358,7 +358,7 @@ float DepthValue(vk::Format format, const uint8_t* p) {
 	}
 }
 
-enum class Kind : char { Color = 'c', Depth = 'z', Storage = 's' };
+enum class Kind : char { Color = 'c', Depth = 'z', Storage = 's', Stencil = 'k' };
 
 struct Pending {
 	uint32_t             op   = 0;
@@ -454,7 +454,12 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 	auto&      graphics = context.GetGraphics();
 	const auto format   = image.backing.format;
 	const bool depth    = kind == Kind::Depth;
-	const auto info     = depth ? std::optional<FormatInfo>(FormatInfo {DepthBytes(format)}) : Describe(format);
+	const bool stencil  = kind == Kind::Stencil;
+	const bool has_stencil = format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint ||
+	                         format == vk::Format::eD16UnormS8Uint || format == vk::Format::eS8Uint;
+	const auto info = depth     ? std::optional<FormatInfo>(FormatInfo {DepthBytes(format)})
+	                  : stencil ? std::optional<FormatInfo>(FormatInfo {has_stencil ? 1u : 0u})
+	                            : Describe(format);
 	p.format  = vk::to_string(format);
 	p.samples = image.backing.samples;
 	if (image.backing.image_type == vk::ImageType::e3D) {
@@ -462,11 +467,11 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 		p.layer = 0;
 	}
 	if (!info || info->bytes == 0) {
-		p.note = "format not converted";
+		p.note += "format not converted";
 		return false;
 	}
-	if (image.backing.samples > 1 && depth) {
-		p.note = "multisampled depth";
+	if (image.backing.samples > 1 && (depth || stencil)) {
+		p.note += "multisampled depth";
 		return false;
 	}
 	if (p.mip >= image.backing.mip_levels ||
@@ -506,7 +511,9 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 		command.copyImageToBuffer(g_resolve.image, vk::ImageLayout::eTransferSrcOptimal, g_staging, 1, &region);
 	} else {
 		const bool volume = image.backing.image_type == vk::ImageType::e3D;
-		region.imageSubresource = {depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor,
+		region.imageSubresource = {depth     ? vk::ImageAspectFlagBits::eDepth
+		                           : stencil ? vk::ImageAspectFlagBits::eStencil
+		                                     : vk::ImageAspectFlagBits::eColor,
 		                           p.mip, volume ? 0u : p.layer, 1};
 		command.copyImageToBuffer(image.backing.image, vk::ImageLayout::eTransferSrcOptimal, g_staging, 1,
 		                          &region);
@@ -544,7 +551,21 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 				bgr[0] = bgr[1] = bgr[2] = Unorm((DepthValue(format, texel(x, y)) - lo) * scale);
 			}
 		}
-		p.note = fmt::format("depth {:.6f}..{:.6f}", lo, hi);
+		p.note += fmt::format("depth {:.6f}..{:.6f}", lo, hi);
+	} else if (stencil) {
+		// Each stencil value its own color; 0 stays black.
+		uint32_t seen = 0;
+		for (uint32_t y = 0; y < p.height; ++y) {
+			for (uint32_t x = 0; x < p.width; ++x) {
+				const uint8_t v   = *texel(x, y);
+				auto*         bgr = &p.pixels[static_cast<size_t>(y) * row + x * 3u];
+				bgr[0]            = static_cast<uint8_t>(v * 151u);
+				bgr[1]            = static_cast<uint8_t>(v * 91u);
+				bgr[2]            = static_cast<uint8_t>(v * 37u);
+				seen |= v != 0 ? 1u << (v & 31u) : 0u;
+			}
+		}
+		p.note += fmt::format("stencil values (bit = value mod 32) 0x{:08x}", seen);
 	} else {
 		for (uint32_t y = 0; y < p.height; ++y) {
 			for (uint32_t x = 0; x < p.width; ++x) {
@@ -552,7 +573,7 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 			}
 		}
 		if (resolve) {
-			p.note = "resolved";
+			p.note += "resolved";
 		}
 	}
 	return true;
@@ -566,6 +587,7 @@ struct Target {
 	uint32_t     mip  = 0;
 	uint32_t     layer = 0;
 	vk::Extent2D extent {};
+	std::string  note;
 };
 
 void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const Target> list,
@@ -588,6 +610,7 @@ void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const 
 		p.layer        = target.layer;
 		p.address      = image.info.data.address;
 		p.shaders      = shaders;
+		p.note         = target.note;
 		if (!ReadBack(context, buffer, image, target.kind, target.extent, p)) {
 			WriteRow(p, "");
 			continue;
@@ -718,11 +741,25 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 		}
 	}
 	const auto* depth = state.depth;
-	if (depth != nullptr && depth->image_id && depth->depth_write_enable) {
-		const auto mip = depth->desc.view_info.base_level;
-		list.push_back({depth->image_id, Kind::Depth, 0, mip, depth->desc.view_info.base_layer,
-		                {std::max(depth->desc.info.extent.width >> mip, 1u),
-		                 std::max(depth->desc.info.extent.height >> mip, 1u)}});
+	if (depth != nullptr && depth->image_id) {
+		const auto         mip    = depth->desc.view_info.base_level;
+		const vk::Extent2D extent {std::max(depth->desc.info.extent.width >> mip, 1u),
+		                           std::max(depth->desc.info.extent.height >> mip, 1u)};
+		const auto&        front  = depth->stencil_front;
+		const auto         note   = depth->stencil_test_enable
+		                                ? fmt::format("stencil {} ref 0x{:x} read 0x{:x} write 0x{:x} pass {}; ",
+		                                              vk::to_string(front.compareOp), front.reference,
+		                                              front.compareMask, front.writeMask,
+		                                              vk::to_string(front.passOp))
+		                                : std::string {};
+		if (depth->depth_write_enable) {
+			list.push_back({depth->image_id, Kind::Depth, 0, mip, depth->desc.view_info.base_layer, extent, note});
+		}
+		// The stencil the draw tests or writes, for the draws dumped one by one.
+		const auto op = g_draw + 1;
+		if (depth->stencil_test_enable && op >= g_each_from && op <= g_each_to) {
+			list.push_back({depth->image_id, Kind::Stencil, 0, mip, depth->desc.view_info.base_layer, extent, note});
+		}
 	}
 	DumpTargets(context, buffer, list, pipeline, false);
 }
