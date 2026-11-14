@@ -761,9 +761,11 @@ uint64_t Image::HashGuestEdges() const {
 	const uint64_t tail_address = tail_begin < head_end ? head_end : tail_begin;
 	const uint64_t tail_size    = range.End() - tail_address;
 	if ((head_size != 0 &&
-	     !LibKernel::Memory::TryReadBacking(range.address, bytes.data(), head_size)) ||
+	     !LibKernel::Memory::TryReadBacking(range.address, bytes.data(), head_size) &&
+	     !LibKernel::Memory::CopySparseMemory(range.address, bytes.data(), head_size)) ||
 	    (tail_size != 0 &&
-	     !LibKernel::Memory::TryReadBacking(tail_address, bytes.data() + head_size, tail_size))) {
+	     !LibKernel::Memory::TryReadBacking(tail_address, bytes.data() + head_size, tail_size) &&
+	     !LibKernel::Memory::CopySparseMemory(tail_address, bytes.data() + head_size, tail_size))) {
 		EXIT("Image: failed to hash guest backing\n");
 	}
 	return XXH3_64bits(bytes.data(), static_cast<size_t>(head_size + tail_size));

@@ -1518,7 +1518,8 @@ void TextureCache::MaterializeColorClear(ImageId id, const ImageDesc& desc,
 	for (uint32_t slice = 0; slice < count; slice++) {
 		const auto address = run(slice);
 		uint8_t code = 0;
-		if (!LibKernel::Memory::TryReadBacking(address, &code, sizeof(code))) {
+		if (!LibKernel::Memory::TryReadBacking(address, &code, sizeof(code)) &&
+		    !LibKernel::Memory::CopySparseMemory(address, &code, sizeof(code))) {
 			EXIT("TextureCache: failed to read color metadata backing\n");
 		}
 		vk::ClearValue clear {};
@@ -1526,7 +1527,8 @@ void TextureCache::MaterializeColorClear(ImageId id, const ImageDesc& desc,
 			continue;
 		}
 		std::vector<uint8_t> bytes(mip.size);
-		if (!LibKernel::Memory::TryReadBacking(address, bytes.data(), bytes.size())) {
+		if (!LibKernel::Memory::TryReadBacking(address, bytes.data(), bytes.size()) &&
+		    !LibKernel::Memory::CopySparseMemory(address, bytes.data(), bytes.size())) {
 			EXIT("TextureCache: failed to read color metadata slice\n");
 		}
 		if (!std::all_of(bytes.begin(), bytes.end(), [code](uint8_t byte) { return byte == code; })) {

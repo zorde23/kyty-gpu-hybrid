@@ -339,6 +339,9 @@ public:
 		const auto end   = vaddr + size;
 		auto       first = m_maps.upper_bound(vaddr);
 		if (m_borrowed && !CoveredUnlocked(vaddr, size)) {
+			if (!HostReadable(vaddr, size)) {
+				return false;
+			}
 			std::memcpy(destination, reinterpret_cast<const void*>(vaddr), size);
 			return true;
 		}
@@ -386,7 +389,9 @@ public:
 		}
 		const auto& entry = std::prev(mapping)->second;
 		if (vaddr < entry.vaddr || end > entry.vaddr + entry.size) {
-			return m_borrowed && !CoveredUnlocked(vaddr, size) ? reinterpret_cast<const uint8_t*>(vaddr) : nullptr;
+			return m_borrowed && !CoveredUnlocked(vaddr, size) && HostReadable(vaddr, size)
+			           ? reinterpret_cast<const uint8_t*>(vaddr)
+			           : nullptr;
 		}
 		RememberMapping(entry, vaddr, end);
 		return At(entry.backing_offset + (vaddr - entry.vaddr));

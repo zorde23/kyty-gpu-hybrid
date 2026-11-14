@@ -1136,10 +1136,16 @@ static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size) {
 	while (readable < size) {
 		MEMORY_BASIC_INFORMATION info {};
 		if (VirtualQuery(reinterpret_cast<const void*>(vaddr + readable), &info, sizeof(info)) == 0 ||
-		    info.State != MEM_COMMIT || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+		    info.State != MEM_COMMIT) {
 			break;
 		}
-		readable = std::min(size, reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize - vaddr);
+		const auto end = std::min(size, reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize - vaddr);
+		// A donated page Kyty's tracker made no-access is still mapped: it is read through Kyty's view.
+		if ((info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0 &&
+		    !g_guest_address_space->BackingContains(vaddr + readable, end - readable)) {
+			break;
+		}
+		readable = end;
 	}
 	return readable;
 #else
@@ -1152,6 +1158,16 @@ uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size) {
 
 	const auto clamped_size =
 	    Hybrid::Enabled() ? HybridReadableSize(vaddr, size) : g_virtual_ranges->ClampRangeSize(vaddr, size);
+	if (clamped_size == 0 && Hybrid::Enabled()) {
+		// The hybrid: memory the executable does not have mapped (freed while a descriptor still points at it).
+		// Readers zero-fill or refuse it, so the range is kept instead of ending the process.
+		static std::atomic<uint32_t> reported {0};
+		if (reported.fetch_add(1, std::memory_order_relaxed) < 20) {
+			std::fprintf(stderr, "[hib-mem] range not mapped by the executable: 0x%016" PRIx64 " size 0x%" PRIx64 "\n",
+			             vaddr, size);
+		}
+		return size;
+	}
 	if (clamped_size == 0) {
 		EXIT("Memory: attempted to access invalid address 0x%016" PRIx64 " with size 0x%016" PRIx64
 		     "\n",
@@ -1167,6 +1183,15 @@ uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size) {
 
 void WriteBacking(uint64_t vaddr, const void* data, uint64_t size) noexcept {
 	if (!TryWriteBacking(vaddr, data, size)) {
+		if (Hybrid::Enabled()) {
+			// The hybrid: the executable no longer has the range readable; the GPU's write back is dropped.
+			static std::atomic<uint32_t> reported {0};
+			if (reported.fetch_add(1, std::memory_order_relaxed) < 20) {
+				std::fprintf(stderr, "[hib-mem] write back dropped, range not mapped by the executable: 0x%016" PRIx64
+				             " size 0x%" PRIx64 "\n", vaddr, size);
+			}
+			return;
+		}
 		EXIT("Memory: required direct-backing write failed, addr=0x%016" PRIx64
 		     " size=0x%016" PRIx64 "\n",
 		     vaddr, size);
