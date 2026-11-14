@@ -1,10 +1,15 @@
-// kyty_gpu.dll (hybrid step 0): the Kyty GPU libraries (Graphics5 = Agc, Graphics5Driver = AgcDriver,
-// VideoOut) and Pad (Kyty owns the window and its input) as a DLL that the AnyPS5 executable resolves by NID. Step 0 only resolves; nothing here
-// initializes the GPU, kernel or memory, so no export may be called yet.
+// kyty_gpu.dll: the Kyty GPU libraries (Graphics5 = Agc, Graphics5Driver = AgcDriver, VideoOut) and Pad as a
+// DLL inside the AnyPS5 executable, which resolves them by NID and reports its guest memory to them. Every
+// export catches at the border: no exception crosses into the executable (hybrid requirement 8).
+#include "common/logging/log.h"
+#include "hybrid/hybrid.h"
+#include "kernel/memory.h"
 #include "libs/libs.h"
 #include "loader/symbolDatabase.h"
 
 #include <cstdint>
+#include <cstdio>
+#include <exception>
 #include <mutex>
 #include <string>
 
@@ -29,20 +34,107 @@ Loader::SymbolDatabase& Database() {
 	return database;
 }
 
+void Failed(const char* export_name, const char* what) noexcept {
+	std::fprintf(stderr, "[kyty-gpu] %s failed: %s\n", export_name, what);
+	std::fflush(stderr);
+}
+
+template <typename Body>
+auto Guarded(const char* export_name, Body&& body, decltype(body()) fallback) noexcept {
+	try {
+		return body();
+	} catch (const std::exception& error) {
+		Failed(export_name, error.what());
+	} catch (...) {
+		Failed(export_name, "unknown exception");
+	}
+	return fallback;
+}
+
 } // namespace
 
 // The SysV-ABI entry point of the Kyty function or object registered under this NID, or 0 when Kyty
 // does not have it.
 extern "C" __declspec(dllexport) uint64_t kyty_gpu_resolve(const char* nid) {
-	if (nid == nullptr) {
-		return 0;
-	}
-	const std::string key(nid);
-	const auto&       database = Database();
-	for (const auto type: {Loader::SymbolType::Func, Loader::SymbolType::Object}) {
-		if (const auto* record = database.FindByNid(key, type); record != nullptr) {
-			return record->vaddr;
-		}
-	}
-	return 0;
+	return Guarded(
+	    "kyty_gpu_resolve",
+	    [&]() -> uint64_t {
+		    if (nid == nullptr) {
+			    return 0;
+		    }
+		    const std::string key(nid);
+		    const auto&       database = Database();
+		    for (const auto type: {Loader::SymbolType::Func, Loader::SymbolType::Object}) {
+			    if (const auto* record = database.FindByNid(key, type); record != nullptr) {
+				    return record->vaddr;
+			    }
+		    }
+		    return 0;
+	    },
+	    uint64_t {0});
 }
+
+extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
+	Guarded(
+	    "kyty_gpu_init",
+	    [&]() -> bool {
+		    if (host == nullptr || host->version != 1) {
+			    Failed("kyty_gpu_init", "unsupported host table");
+			    return false;
+		    }
+		    Hybrid::SetHost(host);
+		    return true;
+	    },
+	    false);
+}
+
+extern "C" __declspec(dllexport) void kyty_gpu_on_map(uint64_t address, uint64_t bytes, uint32_t protection,
+                                                      void* section, uint64_t offset) {
+	Guarded(
+	    "kyty_gpu_on_map",
+	    [&]() -> bool {
+		    Libs::LibKernel::Memory::HybridOnMap(address, bytes, protection, section, offset);
+		    return true;
+	    },
+	    false);
+}
+
+extern "C" __declspec(dllexport) void kyty_gpu_on_unmap(uint64_t address, uint64_t bytes) {
+	Guarded(
+	    "kyty_gpu_on_unmap",
+	    [&]() -> bool {
+		    Libs::LibKernel::Memory::HybridOnUnmap(address, bytes);
+		    return true;
+	    },
+	    false);
+}
+
+extern "C" __declspec(dllexport) void kyty_gpu_on_protect(uint64_t address, uint64_t bytes,
+                                                          uint32_t protection) {
+	Guarded(
+	    "kyty_gpu_on_protect",
+	    [&]() -> bool {
+		    Libs::LibKernel::Memory::HybridOnProtect(address, bytes, protection);
+		    return true;
+	    },
+	    false);
+}
+
+extern "C" __declspec(dllexport) void kyty_gpu_on_section_closed(void* section) {
+	Guarded(
+	    "kyty_gpu_on_section_closed",
+	    [&]() -> bool {
+		    Libs::LibKernel::Memory::HybridOnSectionClosed(section);
+		    return true;
+	    },
+	    false);
+}
+
+// Called from inside the executable's vectored handler: must not allocate or lock what the faulting thread
+// may hold. Kyty's own fault resolution is wired in K3; until then it resolves nothing.
+extern "C" __declspec(dllexport) bool kyty_gpu_handle_fault(uint64_t /*address*/, uint32_t /*access*/,
+                                                            uint64_t /*rip*/, void* /*context*/) {
+	return false;
+}
+
+extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t /*address*/, uint64_t /*bytes*/) {}

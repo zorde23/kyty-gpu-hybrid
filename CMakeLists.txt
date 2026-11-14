@@ -288,6 +288,7 @@ endif()
 add_subdirectory("${KYTY_SOURCE_DIR}/common" "${CMAKE_CURRENT_BINARY_DIR}/common")
 
 file(GLOB kyty_emulator_src CONFIGURE_DEPENDS
+	"${KYTY_SOURCE_DIR}/hybrid/hybridState.cpp"
 	"${KYTY_SOURCE_DIR}/libs/*.cpp"
 	"${KYTY_SOURCE_DIR}/libs/*.h"
 	"${KYTY_SOURCE_DIR}/graphics/*.cpp"

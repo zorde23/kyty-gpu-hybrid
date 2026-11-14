@@ -254,6 +254,13 @@ bool     ProtectGuestMemory(uint64_t vaddr, uint64_t size, Common::VirtualMemory
                             Common::VirtualMemory::Mode* old_mode = nullptr);
 // Transient PageManager watch state; does not change the guest mapping's semantic protection.
 bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size, Common::VirtualMemory::Mode mode);
+// The hybrid (kyty_gpu.dll in the AnyPS5 executable): the executable maps guest memory and reports each
+// direct memory mapping (its section and offset), unmap (before the system unmaps), protection change and
+// closed section.
+void HybridOnMap(uint64_t vaddr, uint64_t size, uint32_t protection, void* section, uint64_t offset);
+void HybridOnUnmap(uint64_t vaddr, uint64_t size);
+void HybridOnProtect(uint64_t vaddr, uint64_t size, uint32_t protection);
+void HybridOnSectionClosed(void* section);
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)

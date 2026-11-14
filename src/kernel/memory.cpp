@@ -8,6 +8,7 @@
 #include "common/virtualMemory.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "hybrid/hybrid.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
 #include "loader/systemContent.h"
@@ -3594,8 +3595,26 @@ bool ProtectGuestMemory(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode,
 }
 
 bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
+	if (const auto* host = Hybrid::Host()) {
+		const uint32_t tracker = mode == VirtualMemory::Mode::NoAccess ? 2u
+		                         : (static_cast<uint32_t>(mode) & static_cast<uint32_t>(VirtualMemory::Mode::Write)) == 0 ? 1u
+		                                                                                                               : 0u;
+		return host->protect_host(vaddr, size, tracker);
+	}
 	return g_guest_address_space->ProtectTransient(vaddr, size, mode);
 }
+
+void HybridOnMap(uint64_t vaddr, uint64_t size, uint32_t /*protection*/, void* /*section*/, uint64_t /*offset*/) {
+	MapGpuRange(vaddr, size);
+}
+
+void HybridOnUnmap(uint64_t vaddr, uint64_t size) {
+	UnmapGpuRange(vaddr, size);
+}
+
+void HybridOnProtect(uint64_t /*vaddr*/, uint64_t /*size*/, uint32_t /*protection*/) {}
+
+void HybridOnSectionClosed(void* /*section*/) {}
 
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size) {
 	std::lock_guard<std::recursive_mutex> memory_operation_lock(g_memory_operation_mutex);
