@@ -106,6 +106,9 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 			    options.screen_width          = 1920;
 			    options.screen_height         = 1080;
 			    options.readback_tiled_images = true;
+			    // The game asks the executable for its user (libSceUserService stays in the executable): Kyty's
+			    // pad maps players by that id.
+			    options.user_id = 0x10000000;
 			    Config::Load(options);
 			    subsystems.Initialize<Log::Lifecycle>();
 			    subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
