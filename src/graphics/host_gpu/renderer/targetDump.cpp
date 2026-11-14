@@ -96,8 +96,8 @@ struct FormatInfo {
 
 std::optional<FormatInfo> Describe(vk::Format format) {
 	switch (format) {
-		case vk::Format::eR8Unorm: return FormatInfo {1};
-		case vk::Format::eR8G8Unorm: case vk::Format::eR16Sfloat: case vk::Format::eR16Unorm:
+		case vk::Format::eR8Unorm: case vk::Format::eR8Uint: return FormatInfo {1};
+		case vk::Format::eR8G8Unorm: case vk::Format::eR16Sfloat: case vk::Format::eR16Unorm: case vk::Format::eR16Uint:
 			return FormatInfo {2};
 		case vk::Format::eR8G8B8A8Unorm: case vk::Format::eR8G8B8A8Srgb:
 		case vk::Format::eB8G8R8A8Unorm: case vk::Format::eB8G8R8A8Srgb:
@@ -106,7 +106,7 @@ std::optional<FormatInfo> Describe(vk::Format format) {
 		case vk::Format::eR16G16Sfloat: case vk::Format::eR16G16Unorm: case vk::Format::eR32Uint:
 			return FormatInfo {4};
 		case vk::Format::eR16G16B16A16Sfloat: case vk::Format::eR16G16B16A16Unorm:
-		case vk::Format::eR32G32Sfloat:
+		case vk::Format::eR32G32Sfloat: case vk::Format::eR32G32Uint:
 			return FormatInfo {8};
 		case vk::Format::eR32G32B32A32Sfloat: return FormatInfo {16};
 		default: return std::nullopt;
@@ -156,6 +156,18 @@ void Convert(vk::Format format, const uint8_t* p, uint8_t* bgr) {
 			break;
 		case vk::Format::eR32Sfloat: r = g = b = Hdr(f(0)); break;
 		case vk::Format::eR32Uint: r = g = b = static_cast<uint8_t>(w); break;
+		case vk::Format::eR8Uint: r = g = b = p[0]; break;
+		case vk::Format::eR16Uint: r = g = b = static_cast<uint8_t>(h(0)); break;
+		// Light or tile bit masks: 16 levels per set bit.
+		case vk::Format::eR32G32Uint: {
+			uint32_t x = 0;
+			uint32_t y = 0;
+			std::memcpy(&x, p, 4);
+			std::memcpy(&y, p + 4, 4);
+			r = static_cast<uint8_t>(std::min(255, std::popcount(x) * 16));
+			g = static_cast<uint8_t>(std::min(255, std::popcount(y) * 16));
+			break;
+		}
 		case vk::Format::eR16G16Sfloat: r = Hdr(HalfToFloat(h(0))); g = Hdr(HalfToFloat(h(1))); break;
 		case vk::Format::eR16G16Unorm: r = static_cast<uint8_t>(h(0) >> 8u); g = static_cast<uint8_t>(h(1) >> 8u); break;
 		case vk::Format::eR16G16B16A16Sfloat:
