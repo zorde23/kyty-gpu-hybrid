@@ -19,6 +19,7 @@
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/host_gpu/renderer/render.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
@@ -351,6 +352,26 @@ static bool HasStorageWrites(const ShaderComputeInputInfo& input_info,
 	       });
 }
 
+// The storage images a dispatch writes, for the target dump.
+static void DumpDispatchTargets(RenderContext& context, CommandBuffer& buffer,
+                                const ShaderRecompiler::IR::ShaderInfo& info,
+                                const PreparedBindings& bindings, vk::Pipeline pipeline) {
+	if (!TargetDump::Enabled()) {
+		return;
+	}
+	std::vector<TargetDump::StorageTarget> targets;
+	for (size_t i = 0; i < info.images.size() && i < bindings.images.size(); ++i) {
+		const auto& binding = bindings.images[i];
+		if (info.images[i].written &&
+		    info.images[i].resource_class == ShaderRecompiler::IR::ImageResourceClass::Storage &&
+		    binding.image_id) {
+			targets.push_back({binding.image_id.index, binding.desc.view_info.base_level,
+			                   binding.desc.view_info.base_layer});
+		}
+	}
+	TargetDump::AfterDispatch(context, buffer, targets, pipeline);
+}
+
 void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group_x,
                                     uint32_t thread_group_y, uint32_t thread_group_z, uint32_t mode,
                                     bool async_compute) {
@@ -573,6 +594,7 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 		vk_buffer.dispatch(thread_group_x, thread_group_y, thread_group_z);
 	}
 	Common::DebugCounters::Add(Common::DebugCounters::Counter::Dispatches);
+	DumpDispatchTargets(m_context, buffer, program.info, bindings, pipeline.pipeline);
 
 	// The removed host fence also ordered read-only dispatches before later writers. Recorded
 	// before the next operation, unless that is a dispatch the guest did not order after this one.
@@ -784,6 +806,7 @@ void RenderExecutor::DispatchIndirectThreads(CommandBuffer& buffer, uint64_t arg
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
 	vk_buffer.dispatchIndirect(stream.Handle(), scratch_offset);
 	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	DumpDispatchTargets(m_context, buffer, program.info, bindings, pipeline.pipeline);
 	ResetBindings();
 }
 
@@ -862,6 +885,7 @@ void RenderExecutor::DispatchIndirect(CommandBuffer& buffer, uint64_t args_addr,
 	vk_buffer.dispatchIndirect(args_buffer->Handle(), args_offset);
 	Common::DebugCounters::Add(Common::DebugCounters::Counter::Dispatches);
 	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	DumpDispatchTargets(m_context, buffer, program.info, bindings, pipeline.pipeline);
 	ResetBindings();
 }
 

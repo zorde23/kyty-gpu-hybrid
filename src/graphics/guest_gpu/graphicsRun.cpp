@@ -21,6 +21,7 @@
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/renderer/sync.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "graphics/presentation/videoOut.h"
 #include "graphics/presentation/window.h"
 #include "graphics/shader/shader.h"
@@ -2544,6 +2545,7 @@ void CommandProcessor::Flip(int handle, int index, int flip_mode, int64_t flip_a
 
 	EmitCallback([this, handle, index, flip_mode, flip_arg] {
 		auto& command = CurrentBuffer();
+		Graphics::TargetDump::OnStreamFlip();
 		m_renderer.GetOcclusionQueries().OnFrame();
 		auto  request = Sync::PrepareVideoOutFlip(command, handle, index, flip_mode, flip_arg);
 		GetScheduler().DeferHostOperation(
@@ -2566,6 +2568,7 @@ void CommandProcessor::PrepareCpuFlip(uint64_t request_id) {
 		};
 		ProcessorScope processor_scope(*this);
 
+		Graphics::TargetDump::OnStreamFlip();
 		m_renderer.GetVideoOut().PrepareFlip(request_id, CurrentBuffer());
 		GetScheduler().DeferHostOperation(
 		    [this, request_id] { m_renderer.GetVideoOut().CompleteFlip(request_id); }, true);

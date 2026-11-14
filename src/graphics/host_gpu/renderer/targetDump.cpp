@@ -18,8 +18,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -32,7 +34,7 @@ enum class State : uint32_t { Idle, Requested, Capturing };
 
 bool                  g_enabled  = false;
 uint32_t              g_at_flip  = 0;
-uint32_t              g_max      = 3500; // a heavy title frame has ~3200 draws
+uint32_t              g_max      = 50000; // a safety stop; the frame ends at the next stream flip
 uint32_t              g_each_from = 1;   // draws dumped one by one (KYTY_TARGET_DUMP_DRAWS=a-b)
 uint32_t              g_each_to   = 0;
 std::atomic<State>    g_state {State::Idle};
@@ -42,6 +44,7 @@ uint32_t              g_frame    = 0;
 uint32_t              g_draw     = 0;
 std::FILE*            g_index    = nullptr;
 std::filesystem::path g_folder;
+std::filesystem::path g_trigger; // KYTY_TARGET_DUMP_TRIGGER
 
 vk::Buffer       g_staging = nullptr;
 vk::DeviceMemory g_memory  = nullptr;
@@ -241,6 +244,361 @@ bool EnsureStaging(GraphicContext& graphics, vk::DeviceSize size) {
 	return true;
 }
 
+// The resolve target of a multisampled color image (vkCmdCopyImageToBuffer takes one sample).
+struct ResolveImage {
+	vk::Image        image  = nullptr;
+	vk::DeviceMemory memory = nullptr;
+	vk::Format       format = vk::Format::eUndefined;
+	vk::Extent2D     extent {};
+};
+ResolveImage g_resolve;
+
+// Called with the GPU idle (each read back waits for it), so the old image can go at once.
+bool EnsureResolveImage(GraphicContext& graphics, vk::Format format, vk::Extent2D extent) {
+	if (g_resolve.image != nullptr && g_resolve.format == format && g_resolve.extent == extent) {
+		return true;
+	}
+	if (g_resolve.image != nullptr) {
+		graphics.device.destroyImage(g_resolve.image, nullptr);
+		graphics.device.freeMemory(g_resolve.memory, nullptr);
+		g_resolve = {};
+	}
+	vk::ImageCreateInfo info {};
+	info.imageType     = vk::ImageType::e2D;
+	info.format        = format;
+	info.extent        = vk::Extent3D {extent.width, extent.height, 1};
+	info.mipLevels     = 1;
+	info.arrayLayers   = 1;
+	info.samples       = vk::SampleCountFlagBits::e1;
+	info.tiling        = vk::ImageTiling::eOptimal;
+	info.usage         = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc;
+	info.initialLayout = vk::ImageLayout::eUndefined;
+	if (graphics.device.createImage(&info, nullptr, &g_resolve.image) != vk::Result::eSuccess) {
+		g_resolve.image = nullptr;
+		return false;
+	}
+	vk::MemoryRequirements requirements {};
+	graphics.device.getImageMemoryRequirements(g_resolve.image, &requirements);
+	const auto& props = graphics.physical_device_memory_properties;
+	uint32_t    type  = UINT32_MAX;
+	for (uint32_t i = 0; i < props.memoryTypeCount && type == UINT32_MAX; ++i) {
+		if ((requirements.memoryTypeBits & (1u << i)) != 0 &&
+		    (props.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)) {
+			type = i;
+		}
+	}
+	vk::MemoryAllocateInfo alloc {};
+	alloc.allocationSize  = requirements.size;
+	alloc.memoryTypeIndex = type;
+	if (type == UINT32_MAX ||
+	    graphics.device.allocateMemory(&alloc, nullptr, &g_resolve.memory) != vk::Result::eSuccess ||
+	    graphics.device.bindImageMemory(g_resolve.image, g_resolve.memory, 0) != vk::Result::eSuccess) {
+		graphics.device.destroyImage(g_resolve.image, nullptr);
+		if (g_resolve.memory != nullptr) {
+			graphics.device.freeMemory(g_resolve.memory, nullptr);
+		}
+		g_resolve = {};
+		return false;
+	}
+	g_resolve.format = format;
+	g_resolve.extent = extent;
+	return true;
+}
+
+void ResolveBarrier(CommandRecorder command, vk::ImageLayout from, vk::ImageLayout to,
+                    vk::AccessFlags src, vk::AccessFlags dst) {
+	vk::ImageMemoryBarrier barrier {};
+	barrier.srcAccessMask       = src;
+	barrier.dstAccessMask       = dst;
+	barrier.oldLayout           = from;
+	barrier.newLayout           = to;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image               = g_resolve.image;
+	barrier.subresourceRange    = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+	command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer,
+	                        {}, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
+// Depth texel bytes of the depth aspect copy, or 0.
+uint32_t DepthBytes(vk::Format format) {
+	switch (format) {
+		case vk::Format::eD16Unorm: case vk::Format::eD16UnormS8Uint: return 2;
+		case vk::Format::eD32Sfloat: case vk::Format::eD32SfloatS8Uint:
+		case vk::Format::eX8D24UnormPack32: case vk::Format::eD24UnormS8Uint: return 4;
+		default: return 0;
+	}
+}
+
+float DepthValue(vk::Format format, const uint8_t* p) {
+	uint32_t w = 0;
+	std::memcpy(&w, p, DepthBytes(format));
+	switch (format) {
+		case vk::Format::eD16Unorm: case vk::Format::eD16UnormS8Uint:
+			return static_cast<float>(w & 0xffffu) / 65535.0f;
+		case vk::Format::eX8D24UnormPack32: case vk::Format::eD24UnormS8Uint:
+			return static_cast<float>(w & 0xffffffu) / 16777215.0f;
+		default: {
+			float v = 0.0f;
+			std::memcpy(&v, p, 4);
+			return v;
+		}
+	}
+}
+
+enum class Kind : char { Color = 'c', Depth = 'z', Storage = 's' };
+
+struct Pending {
+	uint32_t             op   = 0;
+	Kind                 kind = Kind::Color;
+	uint32_t             slot = 0;
+	uint32_t             flip = 0;
+	std::string          format;
+	uint32_t             guest_width  = 0;
+	uint32_t             guest_height = 0;
+	uint32_t             samples      = 1;
+	uint32_t             mip          = 0;
+	uint32_t             layer        = 0;
+	uint64_t             address      = 0;
+	std::string          shaders;
+	std::string          note; // depth range, or why there is no image
+	uint32_t             width  = 0;
+	uint32_t             height = 0;
+	std::vector<uint8_t> pixels;
+};
+
+// guest address, mip, layer, kind
+using TargetKey = std::tuple<uint64_t, uint32_t, uint32_t, char>;
+std::map<TargetKey, Pending> g_pending; // the last operation on each target of the current pass
+
+void WriteRow(const Pending& p, const std::string& file) {
+	std::fprintf(g_index, "%u,%c,%u,%u,%s,%u,%u,%u,%u,%u,0x%llx,%s,%s,%s\n", p.op,
+	             static_cast<char>(p.kind), p.slot, p.flip, p.format.c_str(), p.guest_width,
+	             p.guest_height, p.samples, p.mip, p.layer, static_cast<unsigned long long>(p.address),
+	             file.c_str(), p.shaders.c_str(), p.note.c_str());
+}
+
+void Write(const Pending& p, char prefix) {
+	const auto name = fmt::format("{}{:05}_{}{}.bmp", prefix, p.op, static_cast<char>(p.kind), p.slot);
+	WriteBmp(g_folder / name, p.width, p.height, p.pixels);
+	WriteRow(p, name);
+}
+
+// An operation on targets of a group ends the pass of the other targets of that group it does
+// not use: their last operation's image is final for that pass. Draws (color, depth) and
+// dispatches (storage) are separate groups, so a dispatch between draws leaves the draw passes open.
+void FlushExcept(const std::vector<TargetKey>& keep, bool storage_group) {
+	for (auto it = g_pending.begin(); it != g_pending.end();) {
+		const bool storage = std::get<3>(it->first) == static_cast<char>(Kind::Storage);
+		if (storage == storage_group && std::find(keep.begin(), keep.end(), it->first) == keep.end()) {
+			Write(it->second, 'p');
+			it = g_pending.erase(it);
+		} else {
+			++it;
+		}
+	}
+	std::fflush(g_index);
+}
+
+void FlushAll() {
+	FlushExcept({}, false);
+	FlushExcept({}, true);
+}
+
+void Finish(const char* why) {
+	FlushAll();
+	std::fclose(g_index);
+	g_index = nullptr;
+	g_state.store(State::Idle);
+	Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} done ({}), {} operations in {}\n", g_frame,
+	                                      why, g_draw, g_folder.string()));
+}
+
+bool BeginOperation() {
+	if (!g_enabled || g_state.load(std::memory_order_acquire) != State::Capturing) {
+		return false;
+	}
+	if (g_index == nullptr) {
+		++g_frame;
+		g_draw   = 0;
+		g_folder = std::filesystem::path("_TargetDump") / fmt::format("frame_{}_{}", g_frame, g_flips.load());
+		std::filesystem::create_directories(g_folder);
+		g_index = std::fopen((g_folder / "index.csv").string().c_str(), "w");
+		if (g_index == nullptr) {
+			g_state.store(State::Idle);
+			return false;
+		}
+		std::fprintf(g_index,
+		             "op,kind,slot,flip,format,width,height,samples,mip,layer,guest_address,file,shaders,note\n");
+		Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} started at a stream flip\n", g_frame));
+	}
+	return true;
+}
+
+// Reads back one subresource of a cached image after the operation recorded so far.
+// Returns false (with p.note) when it has no image.
+bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind kind,
+              vk::Extent2D extent, Pending& p) {
+	auto&      graphics = context.GetGraphics();
+	const auto format   = image.backing.format;
+	const bool depth    = kind == Kind::Depth;
+	const auto info     = depth ? std::optional<FormatInfo>(FormatInfo {DepthBytes(format)}) : Describe(format);
+	p.format  = vk::to_string(format);
+	p.samples = image.backing.samples;
+	if (image.backing.image_type == vk::ImageType::e3D) {
+		p.note  = "3d: slice 0";
+		p.layer = 0;
+	}
+	if (!info || info->bytes == 0) {
+		p.note = "format not converted";
+		return false;
+	}
+	if (image.backing.samples > 1 && depth) {
+		p.note = "multisampled depth";
+		return false;
+	}
+	if (p.mip >= image.backing.mip_levels ||
+	    (image.backing.image_type != vk::ImageType::e3D && p.layer >= image.backing.layers)) {
+		p.note = fmt::format("view outside image (mips {} layers {})", image.backing.mip_levels,
+		                     image.backing.layers);
+		return false;
+	}
+	extent.width  = std::min(extent.width, std::max(image.backing.extent.width >> p.mip, 1u));
+	extent.height = std::min(extent.height, std::max(image.backing.extent.height >> p.mip, 1u));
+	if (!EnsureStaging(graphics, static_cast<vk::DeviceSize>(extent.width) * extent.height * info->bytes)) {
+		p.note = "staging allocation failed";
+		return false;
+	}
+	const bool resolve = image.backing.samples > 1;
+	if (resolve && !EnsureResolveImage(graphics, format, extent)) {
+		p.note = "resolve image allocation failed";
+		return false;
+	}
+	buffer.EndRendering();
+	const auto command = buffer.Handle();
+	image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {}, command);
+	vk::BufferImageCopy region {};
+	region.imageExtent = vk::Extent3D {extent.width, extent.height, 1};
+	if (resolve) {
+		ResolveBarrier(command, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, {},
+		               vk::AccessFlagBits::eTransferWrite);
+		vk::ImageResolve resolve_region {};
+		resolve_region.srcSubresource = {vk::ImageAspectFlagBits::eColor, p.mip, p.layer, 1};
+		resolve_region.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+		resolve_region.extent         = region.imageExtent;
+		command.resolveImage(image.backing.image, vk::ImageLayout::eTransferSrcOptimal, g_resolve.image,
+		                     vk::ImageLayout::eTransferDstOptimal, 1, &resolve_region);
+		ResolveBarrier(command, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eTransferSrcOptimal,
+		               vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eTransferRead);
+		region.imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+		command.copyImageToBuffer(g_resolve.image, vk::ImageLayout::eTransferSrcOptimal, g_staging, 1, &region);
+	} else {
+		const bool volume = image.backing.image_type == vk::ImageType::e3D;
+		region.imageSubresource = {depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor,
+		                           p.mip, volume ? 0u : p.layer, 1};
+		command.copyImageToBuffer(image.backing.image, vk::ImageLayout::eTransferSrcOptimal, g_staging, 1,
+		                          &region);
+	}
+	if (image.binding.attachment_layout != vk::ImageLayout::eUndefined) {
+		image.Transit(image.binding.attachment_layout, image.binding.attachment_access, {}, command);
+	}
+	auto& scheduler = context.GetCommandScheduler();
+	scheduler.Wait(scheduler.CurrentTick());
+
+	const uint32_t step = std::max(1u, (extent.width + 1279u) / 1280u);
+	p.width  = (extent.width + step - 1) / step;
+	p.height = (extent.height + step - 1) / step;
+	const uint32_t row = (p.width * 3u + 3u) & ~3u;
+	p.pixels.resize(static_cast<size_t>(row) * p.height);
+	const auto* source = static_cast<const uint8_t*>(g_mapped);
+	const auto  texel  = [&](uint32_t x, uint32_t y) {
+        return source + (static_cast<size_t>(y * step) * extent.width + x * step) * info->bytes;
+	};
+	if (depth) {
+		// Stretched to the range the image holds: depth sits in a narrow band (reversed Z).
+		float lo = std::numeric_limits<float>::max();
+		float hi = std::numeric_limits<float>::lowest();
+		for (uint32_t y = 0; y < p.height; ++y) {
+			for (uint32_t x = 0; x < p.width; ++x) {
+				const float v = DepthValue(format, texel(x, y));
+				lo            = std::min(lo, v);
+				hi            = std::max(hi, v);
+			}
+		}
+		const float scale = hi > lo ? 1.0f / (hi - lo) : 0.0f;
+		for (uint32_t y = 0; y < p.height; ++y) {
+			for (uint32_t x = 0; x < p.width; ++x) {
+				auto* bgr = &p.pixels[static_cast<size_t>(y) * row + x * 3u];
+				bgr[0] = bgr[1] = bgr[2] = Unorm((DepthValue(format, texel(x, y)) - lo) * scale);
+			}
+		}
+		p.note = fmt::format("depth {:.6f}..{:.6f}", lo, hi);
+	} else {
+		for (uint32_t y = 0; y < p.height; ++y) {
+			for (uint32_t x = 0; x < p.width; ++x) {
+				Convert(format, texel(x, y), &p.pixels[static_cast<size_t>(y) * row + x * 3u]);
+			}
+		}
+		if (resolve) {
+			p.note = "resolved";
+		}
+	}
+	return true;
+}
+
+// Reads back the targets of one operation and moves them to the pass bookkeeping.
+struct Target {
+	ImageId      id;
+	Kind         kind = Kind::Color;
+	uint32_t     slot = 0;
+	uint32_t     mip  = 0;
+	uint32_t     layer = 0;
+	vk::Extent2D extent {};
+};
+
+void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const Target> list,
+                 vk::Pipeline pipeline, bool storage_group) {
+	const uint32_t op      = ++g_draw;
+	auto&          cache   = context.GetTextureCache();
+	const auto     shaders = GpuBreadcrumbs::Describe(pipeline);
+	std::vector<TargetKey> keys;
+	std::vector<Pending>   current;
+	for (const auto& target : list) {
+		auto&   image = cache.GetImage(target.id);
+		Pending p;
+		p.op           = op;
+		p.kind         = target.kind;
+		p.slot         = target.slot;
+		p.flip         = g_flips.load();
+		p.guest_width  = target.extent.width;
+		p.guest_height = target.extent.height;
+		p.mip          = target.mip;
+		p.layer        = target.layer;
+		p.address      = image.info.data.address;
+		p.shaders      = shaders;
+		if (!ReadBack(context, buffer, image, target.kind, target.extent, p)) {
+			WriteRow(p, "");
+			continue;
+		}
+		if (op >= g_each_from && op <= g_each_to) {
+			Write(p, 'd');
+		}
+		keys.emplace_back(p.address, p.mip, p.layer, static_cast<char>(p.kind));
+		current.push_back(std::move(p));
+	}
+	// Depth-only draws (shadow maps, prepasses) now have a depth key, so they end color passes
+	// too, as any draw to other targets does.
+	if (!keys.empty()) {
+		FlushExcept(keys, storage_group);
+	}
+	for (size_t i = 0; i < current.size(); ++i) {
+		g_pending[keys[i]] = std::move(current[i]);
+	}
+	if (op >= g_max) {
+		Finish("operation limit");
+	}
+}
+
 } // namespace
 
 void Init() {
@@ -252,6 +610,9 @@ void Init() {
 	if (const char* at = std::getenv("KYTY_TARGET_DUMP_AT_FLIP")) {
 		g_at_flip = static_cast<uint32_t>(std::strtoul(at, nullptr, 10));
 	}
+	if (const char* trigger = std::getenv("KYTY_TARGET_DUMP_TRIGGER"); trigger != nullptr && *trigger != '\0') {
+		g_trigger = trigger;
+	}
 	if (const char* max = std::getenv("KYTY_TARGET_DUMP_MAX")) {
 		g_max = static_cast<uint32_t>(std::strtoul(max, nullptr, 10));
 	}
@@ -262,8 +623,9 @@ void Init() {
 		                                            : g_each_from;
 	}
 	GpuBreadcrumbs::TrackPipelines();
-	Log::WriteToConsoleAndLog(fmt::format("Target dump: on (F9{})\n",
-	                                      g_at_flip != 0 ? fmt::format(", at flip {}", g_at_flip) : ""));
+	Log::WriteToConsoleAndLog(fmt::format(
+	    "Target dump: on (F9{}{})\n", g_at_flip != 0 ? fmt::format(", at flip {}", g_at_flip) : "",
+	    g_trigger.empty() ? "" : fmt::format(", trigger file {}", g_trigger.string())));
 }
 
 bool Enabled() noexcept {
@@ -273,7 +635,7 @@ bool Enabled() noexcept {
 void RequestCapture() noexcept {
 	auto expected = State::Idle;
 	if (g_enabled && g_state.compare_exchange_strong(expected, State::Requested)) {
-		Log::WriteToConsoleAndLog("Target dump: requested, starts at the next flip\n");
+		Log::WriteToConsoleAndLog("Target dump: requested, starts at the next flip in the command stream\n");
 	}
 }
 
@@ -303,154 +665,72 @@ void OnFlip() noexcept {
 	if (g_at_flip != 0 && flips == g_at_flip) {
 		RequestCapture();
 	}
-	// The capture ends after g_max draws, not at a flip: the dump slows the GPU work down while
-	// the presentation keeps flipping.
-	auto expected = State::Requested;
-	g_state.compare_exchange_strong(expected, State::Capturing);
-}
-
-namespace {
-
-struct Pending {
-	uint32_t             draw = 0;
-	uint32_t             slot = 0;
-	uint32_t             flip = 0;
-	std::string          format;
-	uint32_t             guest_width  = 0;
-	uint32_t             guest_height = 0;
-	uint64_t             address      = 0;
-	std::string          shaders;
-	uint32_t             width  = 0;
-	uint32_t             height = 0;
-	std::vector<uint8_t> pixels;
-};
-
-using TargetKey = std::tuple<uint64_t, uint32_t, uint32_t>; // guest address, mip, layer
-std::map<TargetKey, Pending> g_pending; // the last draw of each target of the current pass
-
-void Write(const Pending& p, char prefix) {
-	const auto name = fmt::format("{}{:05}_t{}.bmp", prefix, p.draw, p.slot);
-	WriteBmp(g_folder / name, p.width, p.height, p.pixels);
-	std::fprintf(g_index, "%u,%u,%u,%s,%u,%u,0x%llx,%s,%s\n", p.draw, p.slot, p.flip, p.format.c_str(),
-	             p.guest_width, p.guest_height, static_cast<unsigned long long>(p.address), name.c_str(),
-	             p.shaders.c_str());
-}
-
-void FlushExcept(const std::vector<TargetKey>& keep) {
-	for (auto it = g_pending.begin(); it != g_pending.end();) {
-		if (std::find(keep.begin(), keep.end(), it->first) == keep.end()) {
-			Write(it->second, 'p');
-			it = g_pending.erase(it);
-		} else {
-			++it;
+	// Polled twice a second at 60 fps; the file is removed so one file is one capture.
+	if (!g_trigger.empty() && flips % 30 == 0) {
+		std::error_code error;
+		if (std::filesystem::exists(g_trigger, error)) {
+			std::filesystem::remove(g_trigger, error);
+			RequestCapture();
 		}
 	}
-	std::fflush(g_index);
 }
 
-} // namespace
+void OnStreamFlip() noexcept {
+	if (!g_enabled) {
+		return;
+	}
+	auto expected = State::Requested;
+	if (g_state.compare_exchange_strong(expected, State::Capturing)) {
+		return;
+	}
+	if (expected == State::Capturing) {
+		if (g_index != nullptr) {
+			Finish("next stream flip");
+		} else {
+			g_state.store(State::Idle);
+		}
+	}
+}
 
 void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
                vk::Pipeline pipeline) {
-	if (!g_enabled || g_state.load(std::memory_order_acquire) != State::Capturing) {
+	if (!BeginOperation()) {
 		return;
 	}
-	if (g_index == nullptr) {
-		++g_frame;
-		g_draw   = 0;
-		g_folder = std::filesystem::path("_TargetDump") / fmt::format("frame_{}_{}", g_frame, g_flips.load());
-		std::filesystem::create_directories(g_folder);
-		g_index = std::fopen((g_folder / "index.csv").string().c_str(), "w");
-		if (g_index == nullptr) {
-			g_state.store(State::Idle);
-			return;
-		}
-		std::fprintf(g_index, "draw,slot,flip,format,width,height,guest_address,file,shaders\n");
-		Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} started ({} draws)\n", g_frame, g_max));
-	}
-	const uint32_t draw = ++g_draw;
-	auto& graphics = context.GetGraphics();
-	auto& cache    = context.GetTextureCache();
-	const auto shaders = GpuBreadcrumbs::Describe(pipeline);
-	std::vector<TargetKey> targets;
-	std::vector<Pending>   current;
+	std::vector<Target> list;
 	for (uint32_t i = 0; i < state.color_count; ++i) {
 		const auto& color = state.colors[i];
-		if (!color.image_id) {
-			continue;
+		if (color.image_id) {
+			list.push_back({color.image_id, Kind::Color, color.target_slot, color.desc.view_info.base_level,
+			                color.desc.view_info.base_layer, color.Extent()});
 		}
-		auto&      image  = cache.GetImage(color.image_id);
-		const auto format = image.backing.format;
-		const auto info   = Describe(format);
-		const auto extent = color.Extent();
-		const auto mip    = color.desc.view_info.base_level;
-		const auto layer  = color.desc.view_info.base_layer;
-		if (!info || image.backing.samples > 1 ||
-		    !EnsureStaging(graphics, static_cast<vk::DeviceSize>(extent.width) * extent.height * info->bytes)) {
-			std::fprintf(g_index, "%u,%u,%u,%d,%u,%u,0x%llx,,%s\n", draw, color.target_slot, g_flips.load(),
-			             static_cast<int>(format), extent.width, extent.height,
-			             static_cast<unsigned long long>(image.info.data.address), shaders.c_str());
-			continue;
-		}
-		buffer.EndRendering();
-		const auto command = buffer.Handle();
-		image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {}, command);
-		vk::BufferImageCopy region {};
-		region.imageSubresource = {vk::ImageAspectFlagBits::eColor, mip, layer, 1};
-		region.imageExtent      = vk::Extent3D {extent.width, extent.height, 1};
-		command.copyImageToBuffer(image.backing.image, vk::ImageLayout::eTransferSrcOptimal, g_staging, 1,
-		                          &region);
-		if (image.binding.attachment_layout != vk::ImageLayout::eUndefined) {
-			image.Transit(image.binding.attachment_layout, image.binding.attachment_access, {}, command);
-		}
-		auto& scheduler = context.GetCommandScheduler();
-		scheduler.Wait(scheduler.CurrentTick());
+	}
+	const auto* depth = state.depth;
+	if (depth != nullptr && depth->image_id && depth->depth_write_enable) {
+		const auto mip = depth->desc.view_info.base_level;
+		list.push_back({depth->image_id, Kind::Depth, 0, mip, depth->desc.view_info.base_layer,
+		                {std::max(depth->desc.info.extent.width >> mip, 1u),
+		                 std::max(depth->desc.info.extent.height >> mip, 1u)}});
+	}
+	DumpTargets(context, buffer, list, pipeline, false);
+}
 
-		const uint32_t step = std::max(1u, (extent.width + 1279u) / 1280u);
-		Pending        p;
-		p.draw         = draw;
-		p.slot         = color.target_slot;
-		p.flip         = g_flips.load();
-		p.format       = vk::to_string(format);
-		p.guest_width  = extent.width;
-		p.guest_height = extent.height;
-		p.address      = image.info.data.address;
-		p.shaders      = shaders;
-		p.width        = (extent.width + step - 1) / step;
-		p.height       = (extent.height + step - 1) / step;
-		const uint32_t row = (p.width * 3u + 3u) & ~3u;
-		p.pixels.resize(static_cast<size_t>(row) * p.height);
-		const auto* source = static_cast<const uint8_t*>(g_mapped);
-		for (uint32_t y = 0; y < p.height; ++y) {
-			for (uint32_t x = 0; x < p.width; ++x) {
-				const size_t texel =
-				    (static_cast<size_t>(y * step) * extent.width + x * step) * info->bytes;
-				Convert(format, source + texel, &p.pixels[static_cast<size_t>(y) * row + x * 3u]);
-			}
-		}
-		if (draw >= g_each_from && draw <= g_each_to) {
-			Write(p, 'd');
-		}
-		targets.emplace_back(p.address, mip, layer);
-		current.push_back(std::move(p));
+void AfterDispatch(RenderContext& context, CommandBuffer& buffer, std::span<const StorageTarget> targets,
+                   vk::Pipeline pipeline) {
+	if (!BeginOperation()) {
+		return;
 	}
-	// A draw to other targets ends the pass of the targets it does not use: their last draw's
-	// image is final for that pass.
-	// Depth-only draws (shadow maps, prepasses) leave the color passes open.
-	if (!targets.empty()) {
-		FlushExcept(targets);
+	auto&               cache = context.GetTextureCache();
+	std::vector<Target> list;
+	for (uint32_t i = 0; i < targets.size(); ++i) {
+		const ImageId id {targets[i].id};
+		const auto&   image = cache.GetImage(id);
+		const auto    mip   = targets[i].mip;
+		list.push_back({id, Kind::Storage, i, mip, targets[i].layer,
+		                {std::max(image.backing.extent.width >> mip, 1u),
+		                 std::max(image.backing.extent.height >> mip, 1u)}});
 	}
-	for (size_t i = 0; i < current.size(); ++i) {
-		g_pending[targets[i]] = std::move(current[i]);
-	}
-	if (draw >= g_max) {
-		FlushExcept({});
-		std::fclose(g_index);
-		g_index = nullptr;
-		g_state.store(State::Idle);
-		Log::WriteToConsoleAndLog(fmt::format("Target dump: frame {} done, {} draws in {}\n", g_frame,
-		                                      draw, g_folder.string()));
-	}
+	DumpTargets(context, buffer, list, pipeline, true);
 }
 
 } // namespace Libs::Graphics::TargetDump
