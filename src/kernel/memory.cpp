@@ -1126,10 +1126,32 @@ bool TryReadAroundGpuWritesOnPage(uint64_t vaddr, void* data, uint64_t size,
 	return true;
 }
 
+// The hybrid: Kyty records no guest ranges (the executable maps them), so a range counts as far as the host
+// has it committed and readable.
+// shortcut: one VirtualQuery per call, costly per resource (as DescribeCommitted was in the g5); before step 2,
+// answer from the ranges the executable reports (on_map/on_unmap/on_protect) instead of asking the system.
+static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	uint64_t readable = 0;
+	while (readable < size) {
+		MEMORY_BASIC_INFORMATION info {};
+		if (VirtualQuery(reinterpret_cast<const void*>(vaddr + readable), &info, sizeof(info)) == 0 ||
+		    info.State != MEM_COMMIT || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+			break;
+		}
+		readable = std::min(size, reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize - vaddr);
+	}
+	return readable;
+#else
+	return size;
+#endif
+}
+
 uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size) {
 	EXIT_IF(g_virtual_ranges == nullptr);
 
-	const auto clamped_size = g_virtual_ranges->ClampRangeSize(vaddr, size);
+	const auto clamped_size =
+	    Hybrid::Enabled() ? HybridReadableSize(vaddr, size) : g_virtual_ranges->ClampRangeSize(vaddr, size);
 	if (clamped_size == 0) {
 		EXIT("Memory: attempted to access invalid address 0x%016" PRIx64 " with size 0x%016" PRIx64
 		     "\n",
@@ -1233,6 +1255,9 @@ bool IsBackingReadable(uint64_t vaddr, uint64_t size) {
 	}
 	if (g_guest_address_space->BackingContains(vaddr, size)) {
 		return true;
+	}
+	if (Hybrid::Enabled()) {
+		return HybridReadableSize(vaddr, size) == size;
 	}
 	std::vector<VirtualRanges::Range> ranges;
 	return g_virtual_ranges != nullptr && IsInPrtAperture(vaddr, size) &&
