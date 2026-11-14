@@ -130,11 +130,24 @@ extern "C" __declspec(dllexport) void kyty_gpu_on_section_closed(void* section) 
 	    false);
 }
 
+namespace Loader {
+bool HybridHandleFault(uint64_t vaddr, uint32_t access, uint64_t rip, void* native_context);
+} // namespace Loader
+
 // Called from inside the executable's vectored handler: must not allocate or lock what the faulting thread
-// may hold. Kyty's own fault resolution is wired in K3; until then it resolves nothing.
-extern "C" __declspec(dllexport) bool kyty_gpu_handle_fault(uint64_t /*address*/, uint32_t /*access*/,
-                                                            uint64_t /*rip*/, void* /*context*/) {
-	return false;
+// may hold.
+extern "C" __declspec(dllexport) bool kyty_gpu_handle_fault(uint64_t address, uint32_t access, uint64_t rip,
+                                                            void* context) {
+	return Guarded(
+	    "kyty_gpu_handle_fault", [&] { return Loader::HybridHandleFault(address, access, rip, context); }, false);
 }
 
-extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t /*address*/, uint64_t /*bytes*/) {}
+extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {
+	Guarded(
+	    "kyty_gpu_prepare_host_write",
+	    [&]() -> bool {
+		    Libs::LibKernel::Memory::HybridPrepareHostWrite(address, bytes);
+		    return true;
+	    },
+	    false);
+}

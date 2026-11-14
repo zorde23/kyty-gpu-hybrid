@@ -14,6 +14,7 @@
 #include "loader/systemContent.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -1312,13 +1313,16 @@ void Initialize() {
 	     g_flexible_memory_size / (1024ull * 1024ull),
 	     (g_guest_memory_size - g_flexible_memory_size) / (1024ull * 1024ull));
 
-	g_guest_address_space = std::make_unique<GuestAddressSpace>(PhysicalMemory::TotalSize());
+	g_guest_address_space =
+	    std::make_unique<GuestAddressSpace>(PhysicalMemory::TotalSize(), Hybrid::Enabled());
 	g_physical_memory     = std::make_unique<PhysicalMemory>();
 	g_flexible_memory     = std::make_unique<FlexibleMemory>();
 	g_pooled_memory       = std::make_unique<PooledMemory>();
 	g_virtual_ranges      = std::make_unique<VirtualRanges>();
-	EXIT_IF(!g_guest_address_space->SelfTest());
-	EXIT_IF(!SelfTestSub64SharedPlaceholderAlias());
+	if (!Hybrid::Enabled()) {
+		EXIT_IF(!g_guest_address_space->SelfTest());
+		EXIT_IF(!SelfTestSub64SharedPlaceholderAlias());
+	}
 }
 
 void Shutdown() {
@@ -3604,17 +3608,69 @@ bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size, VirtualMemory::Mode m
 	return g_guest_address_space->ProtectTransient(vaddr, size, mode);
 }
 
-void HybridOnMap(uint64_t vaddr, uint64_t size, uint32_t /*protection*/, void* /*section*/, uint64_t /*offset*/) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+static VirtualMemory::Mode HybridMode(uint32_t protection) {
+	switch (protection & 0xffu) {
+		case PAGE_READONLY: return VirtualMemory::Mode::Read;
+		case PAGE_READWRITE: return VirtualMemory::Mode::ReadWrite;
+		case PAGE_EXECUTE: return VirtualMemory::Mode::Execute;
+		case PAGE_EXECUTE_READ: return VirtualMemory::Mode::ExecuteRead;
+		case PAGE_EXECUTE_READWRITE: return VirtualMemory::Mode::ExecuteReadWrite;
+		default: return VirtualMemory::Mode::NoAccess;
+	}
+}
+
+// Kyty's own view of each section the executable maps direct memory from, kept until the section closes.
+static std::mutex                                g_hybrid_views_mutex;
+static std::unordered_map<void*, const uint8_t*> g_hybrid_views;
+
+static const uint8_t* HybridView(void* section) {
+	std::lock_guard lock(g_hybrid_views_mutex);
+	auto&           view = g_hybrid_views[section];
+	if (view == nullptr) {
+		view = static_cast<const uint8_t*>(MapViewOfFile(section, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0));
+		EXIT_IF(view == nullptr);
+	}
+	return view;
+}
+
+void HybridOnMap(uint64_t vaddr, uint64_t size, uint32_t protection, void* section, uint64_t offset) {
+	g_guest_address_space->MapBorrowed(vaddr, size, HybridView(section) + offset, HybridMode(protection));
 	MapGpuRange(vaddr, size);
 }
 
 void HybridOnUnmap(uint64_t vaddr, uint64_t size) {
 	UnmapGpuRange(vaddr, size);
+	g_guest_address_space->UnmapBorrowed(vaddr, size);
 }
 
-void HybridOnProtect(uint64_t /*vaddr*/, uint64_t /*size*/, uint32_t /*protection*/) {}
+void HybridOnProtect(uint64_t vaddr, uint64_t size, uint32_t protection) {
+	g_guest_address_space->ProtectBorrowed(vaddr, size, HybridMode(protection));
+}
 
-void HybridOnSectionClosed(void* /*section*/) {}
+// shortcut: a GPU thread's cached lookup could still read a view closed here; the executable unmaps every
+// mapping of the section first, so this needs a thread that kept a transfer across the unmap. Upgrade
+// with an epoch wait if a fault ever lands in a closed view.
+void HybridPrepareHostWrite(uint64_t vaddr, uint64_t size) {
+	if (g_gpu_resources != nullptr && IsGpuAddressRange(vaddr, size)) {
+		GetGpuResources().PrepareGpuWrite(reinterpret_cast<const void*>(vaddr), size);
+	}
+}
+
+void HybridOnSectionClosed(void* section) {
+	std::lock_guard lock(g_hybrid_views_mutex);
+	if (const auto view = g_hybrid_views.find(section); view != g_hybrid_views.end()) {
+		UnmapViewOfFile(view->second);
+		g_hybrid_views.erase(view);
+	}
+}
+#else
+void HybridOnMap(uint64_t, uint64_t, uint32_t, void*, uint64_t) {}
+void HybridOnUnmap(uint64_t, uint64_t) {}
+void HybridOnProtect(uint64_t, uint64_t, uint32_t) {}
+void HybridOnSectionClosed(void*) {}
+void HybridPrepareHostWrite(uint64_t, uint64_t) {}
+#endif
 
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size) {
 	std::lock_guard<std::recursive_mutex> memory_operation_lock(g_memory_operation_mutex);

@@ -687,6 +687,36 @@ static bool ReadWalkerGuestMemory(uint64_t address, uint32_t& value, bool ahead,
 	             : Libs::LibKernel::Memory::TryReadAroundGpuWrites(address, &value, sizeof(value));
 }
 
+// The GPU's part of an access violation: SRT walker loads of GPU-owned pages and the page tracking.
+static bool ResolveGpuFault(Libs::Graphics::PageFaultAccess access, uint64_t vaddr, uint64_t rip,
+                            void* native_context) {
+	using GpuAccess = Libs::Graphics::PageFaultAccess;
+	// A walker load of a GPU-owned page reads bytes the GPU did not write from the backing
+	// store instead of reading all the GPU's queued work back.
+	if (access == GpuAccess::Read) {
+		if (const auto length = Libs::Graphics::ShaderRecompiler::IR::SrtWalkerLoadLength(rip)) {
+			uint32_t value = 0;
+			if (Libs::LibKernel::Memory::MayFaultOnGpuRead(vaddr, sizeof(value)) &&
+			    Libs::LibKernel::Memory::TryReadAroundGpuWrites(vaddr, &value, sizeof(value))) {
+				Loader::X64InstructionEmulator::CompleteLoad(native_context, length, value);
+				return true;
+			}
+		}
+	}
+	// A walk ahead of execution does not resolve faults: the load reads zero and the walk
+	// fails.
+	if (const auto length =
+	        Libs::Graphics::ShaderRecompiler::IR::SrtWalkerAheadLoadLength(rip, vaddr)) {
+		Loader::X64InstructionEmulator::SkipLoad(native_context, length);
+		return true;
+	}
+	if (Libs::LibKernel::Memory::HandleGpuFault(access, vaddr)) {
+		Common::DebugCounters::Add(Common::DebugCounters::Counter::GpuFaults);
+		return true;
+	}
+	return false;
+}
+
 static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exception_info) {
 	const auto* info = &exception_info;
 
@@ -710,31 +740,8 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 			case CoreAccess::Execute: access = GpuAccess::Execute; break;
 			case CoreAccess::Unknown: return false;
 		}
-		// A walker load of a GPU-owned page reads bytes the GPU did not write from the backing
-		// store instead of reading all the GPU's queued work back.
-		if (access == GpuAccess::Read) {
-			if (const auto length = Libs::Graphics::ShaderRecompiler::IR::SrtWalkerLoadLength(
-			        info->exception_address)) {
-				uint32_t value = 0;
-				if (Libs::LibKernel::Memory::MayFaultOnGpuRead(info->access_violation_vaddr,
-				                                               sizeof(value)) &&
-				    Libs::LibKernel::Memory::TryReadAroundGpuWrites(info->access_violation_vaddr,
-				                                                    &value, sizeof(value))) {
-					Loader::X64InstructionEmulator::CompleteLoad(info->native_context, length,
-					                                             value);
-					return true;
-				}
-			}
-		}
-		// A walk ahead of execution does not resolve faults: the load reads zero and the walk
-		// fails.
-		if (const auto length = Libs::Graphics::ShaderRecompiler::IR::SrtWalkerAheadLoadLength(
-		        info->exception_address, info->access_violation_vaddr)) {
-			Loader::X64InstructionEmulator::SkipLoad(info->native_context, length);
-			return true;
-		}
-		if (Libs::LibKernel::Memory::HandleGpuFault(access, info->access_violation_vaddr)) {
-			Common::DebugCounters::Add(Common::DebugCounters::Counter::GpuFaults);
+		if (ResolveGpuFault(access, info->access_violation_vaddr, info->exception_address,
+		                    info->native_context)) {
 			return true;
 		}
 		if (transient != 0 && Libs::LibKernel::Memory::RetryTransientUnmapFault(
@@ -2302,6 +2309,22 @@ void* RuntimeLinker::ApplicationHeapMalloc(uint64_t size) {
 	Common::LockGuard lock(m_mutex);
 
 	return m_application_heap_malloc != nullptr ? m_application_heap_malloc(size) : nullptr;
+}
+
+} // namespace Loader
+
+namespace Loader {
+
+// The hybrid: the AnyPS5 executable's vectored handler offers an access violation on donated memory
+// (access as in EXCEPTION_RECORD: 0 read, 1 write, 8 execute) before handling it itself.
+bool HybridHandleFault(uint64_t vaddr, uint32_t access, uint64_t rip, void* native_context) {
+	using GpuAccess = Libs::Graphics::PageFaultAccess;
+	switch (access) {
+		case 0: return ResolveGpuFault(GpuAccess::Read, vaddr, rip, native_context);
+		case 1: return ResolveGpuFault(GpuAccess::Write, vaddr, rip, native_context);
+		case 8: return ResolveGpuFault(GpuAccess::Execute, vaddr, rip, native_context);
+		default: return false;
+	}
 }
 
 } // namespace Loader

@@ -156,7 +156,12 @@ public:
 		AddressRangeUnavailable,
 	};
 
-	explicit GuestBackingStore(uint64_t size): m_size(size) {
+	// borrowed: the hybrid, where the AnyPS5 executable owns the sections and each mapping's
+	// backing_offset holds the absolute address of Kyty's own view of the executable's memory.
+	GuestBackingStore(uint64_t size, bool borrowed): m_size(size), m_borrowed(borrowed) {
+		if (m_borrowed) {
+			return;
+		}
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 		m_handle = CreateFileMappingA(
 		    INVALID_HANDLE_VALUE, nullptr, PAGE_EXECUTE_READWRITE | SEC_COMMIT,
@@ -203,6 +208,9 @@ public:
 	}
 
 	~GuestBackingStore() {
+		if (m_borrowed) {
+			return;
+		}
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 		for (const auto& [_, entry]: m_maps) {
 			UnmapViewPreservePlaceholder(reinterpret_cast<void*>(entry.vaddr), entry.size);
@@ -265,8 +273,8 @@ public:
 			    if (start == vaddr && start + bytes == end) {
 				    RememberMapping(entry, vaddr, end);
 			    }
-			    std::memcpy(m_backing_base + (entry.backing_offset + start - entry.vaddr),
-			                source + (start - vaddr), bytes);
+			    std::memcpy(At(entry.backing_offset + start - entry.vaddr), source + (start - vaddr),
+			                bytes);
 		    },
 		    [](uint64_t, uint64_t) {});
 	}
@@ -310,7 +318,7 @@ public:
 			const auto& entry  = mapping->second;
 			const auto  bytes  = std::min(end, entry.vaddr + entry.size) - current;
 			const auto  offset = entry.backing_offset + current - entry.vaddr;
-			std::memcpy(destination + (current - vaddr), m_backing_base + offset, bytes);
+			std::memcpy(destination + (current - vaddr), At(offset), bytes);
 			current += bytes;
 		}
 		return true;
@@ -338,7 +346,7 @@ public:
 			return nullptr;
 		}
 		RememberMapping(entry, vaddr, end);
-		return m_backing_base + entry.backing_offset + (vaddr - entry.vaddr);
+		return At(entry.backing_offset + (vaddr - entry.vaddr));
 	}
 
 	template <typename Gap>
@@ -351,7 +359,7 @@ public:
 #endif
 		CopySparseRange(m_maps, vaddr, data, size,
 		                [this](const auto& entry, uint64_t start) {
-			                return m_backing_base + (entry.backing_offset + start - entry.vaddr);
+			                return At(entry.backing_offset + start - entry.vaddr);
 		                },
 		                gap);
 	}
@@ -386,6 +394,30 @@ public:
 		MapsChangedUnlocked();
 		BumpBackingEpoch(vaddr, size);
 		return true;
+	}
+
+	// The hybrid: the executable mapped [vaddr, vaddr + size) and `host` is Kyty's view of the same bytes.
+	void MapBorrowed(uint64_t vaddr, uint64_t size, const uint8_t* host, VirtualMemory::Mode mode) {
+		std::lock_guard lock(m_mutex);
+		RemoveMappingsUnlocked(vaddr, size);
+		m_maps.emplace(vaddr, MapEntry {vaddr, size, reinterpret_cast<uint64_t>(host), mode});
+		MapsChangedUnlocked();
+		BumpBackingEpoch(vaddr, size);
+	}
+
+	void UnmapBorrowed(uint64_t vaddr, uint64_t size) {
+		BumpBackingEpoch(vaddr, size);
+		std::lock_guard lock(m_mutex);
+		RemoveMappingsUnlocked(vaddr, size);
+		MapsChangedUnlocked();
+	}
+
+	void ProtectBorrowed(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
+		std::lock_guard lock(m_mutex);
+		ForEachSparseRange(
+		    m_maps, vaddr, size, [&](const auto& entry, uint64_t, uint64_t) { const_cast<MapEntry&>(entry).mode = mode; },
+		    [](uint64_t, uint64_t) {});
+		MapsChangedUnlocked();
 	}
 
 	bool Unmap(uint64_t vaddr, uint64_t size) {
@@ -542,7 +574,10 @@ private:
 		VirtualMemory::Mode mode           = VirtualMemory::Mode::NoAccess;
 	};
 
-#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
+	[[nodiscard]] uint8_t* At(uint64_t backing_offset) const {
+		return m_borrowed ? reinterpret_cast<uint8_t*>(backing_offset) : m_backing_base + backing_offset;
+	}
+
 	void RemoveMappingsUnlocked(uint64_t vaddr, uint64_t size) {
 		const auto end = vaddr + size;
 		auto       it = m_maps.upper_bound(vaddr);
@@ -567,7 +602,6 @@ private:
 			}
 		}
 	}
-#endif
 
 	// The mapping of each 64 KB of guest addresses that a transfer started in, direct mapped:
 	// GPU threads stream thousands of small buffers per frame from rings spread over more
@@ -616,13 +650,13 @@ private:
 		const auto end  = vaddr + size;
 		const auto& slot = cached.slots[SlotOf(vaddr)];
 		if (vaddr >= slot.vaddr && end <= slot.vaddr + slot.size && slot.size != 0) {
-			transfer(m_backing_base + slot.backing_offset + (vaddr - slot.vaddr),
+			transfer(At(slot.backing_offset + (vaddr - slot.vaddr)),
 			         static_cast<size_t>(size));
 			return true;
 		}
 		for (const auto& entry: cached.entries) {
 			if (vaddr >= entry.vaddr && end <= entry.vaddr + entry.size) {
-				transfer(m_backing_base + entry.backing_offset + (vaddr - entry.vaddr),
+				transfer(At(entry.backing_offset + (vaddr - entry.vaddr)),
 				         static_cast<size_t>(size));
 				return true;
 			}
@@ -807,20 +841,33 @@ private:
 
 	uint8_t*                     m_backing_base = nullptr;
 	uint64_t                     m_size         = 0;
+	bool                         m_borrowed     = false;
 	std::shared_mutex            m_mutex;
 	std::map<uint64_t, MapEntry> m_maps;
 };
 
 class GuestAddressSpace {
 public:
-	explicit GuestAddressSpace(uint64_t backing_size) {
+	GuestAddressSpace(uint64_t backing_size, bool borrowed) {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 		SYSTEM_INFO info {};
 		GetSystemInfo(&info);
 		m_granularity = info.dwAllocationGranularity;
 #endif
-		ReserveGuestRegions();
-		m_backing = new GuestBackingStore(backing_size);
+		if (!borrowed) {
+			ReserveGuestRegions();
+		}
+		m_backing = new GuestBackingStore(backing_size, borrowed);
+	}
+
+	void MapBorrowed(uint64_t vaddr, uint64_t size, const uint8_t* host, VirtualMemory::Mode mode) {
+		m_backing->MapBorrowed(vaddr, size, host, mode);
+	}
+
+	void UnmapBorrowed(uint64_t vaddr, uint64_t size) { m_backing->UnmapBorrowed(vaddr, size); }
+
+	void ProtectBorrowed(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
+		m_backing->ProtectBorrowed(vaddr, size, mode);
 	}
 
 	~GuestAddressSpace() {
