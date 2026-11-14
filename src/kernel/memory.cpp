@@ -3660,6 +3660,11 @@ void HybridOnProtect(uint64_t vaddr, uint64_t size, uint32_t protection) {
 // shortcut: a GPU thread's cached lookup could still read a view closed here; the executable unmaps every
 // mapping of the section first, so this needs a thread that kept a transfer across the unmap. Upgrade
 // with an epoch wait if a fault ever lands in a closed view.
+// Memory the executable mapped privately for Kyty itself (the GPU driver page): visible to the GPU, read in place.
+void HybridMapPrivate(uint64_t vaddr, uint64_t size) {
+	MapGpuRange(vaddr, size);
+}
+
 void HybridPrepareHostWrite(uint64_t vaddr, uint64_t size) {
 	if (g_gpu_resources != nullptr && IsGpuAddressRange(vaddr, size)) {
 		GetGpuResources().PrepareGpuWrite(reinterpret_cast<const void*>(vaddr), size);
@@ -3679,6 +3684,7 @@ void HybridOnUnmap(uint64_t, uint64_t) {}
 void HybridOnProtect(uint64_t, uint64_t, uint32_t) {}
 void HybridOnSectionClosed(void*) {}
 void HybridPrepareHostWrite(uint64_t, uint64_t) {}
+void HybridMapPrivate(uint64_t, uint64_t) {}
 #endif
 
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size) {

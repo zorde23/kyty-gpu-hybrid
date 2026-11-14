@@ -4172,6 +4172,7 @@ int Initialize() {
 		if (result != OK) {
 			return result;
 		}
+		LibKernel::Memory::HybridMapPrivate(DriverDmemBase, DriverDmemSize);
 	}
 	const auto allocate = Hybrid::Kernel("rTXw65xmLIA", &LibKernel::Memory::KernelAllocateDirectMemory);
 	const auto size     = Hybrid::Kernel("pO96TwzOm5E", &LibKernel::Memory::KernelGetDirectMemorySize);

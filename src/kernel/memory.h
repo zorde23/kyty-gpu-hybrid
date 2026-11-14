@@ -263,6 +263,8 @@ void HybridOnProtect(uint64_t vaddr, uint64_t size, uint32_t protection);
 void HybridOnSectionClosed(void* section);
 // Before the executable stores into donated memory itself (a file read): opens the pages the GPU tracks.
 void HybridPrepareHostWrite(uint64_t vaddr, uint64_t size);
+// Memory the executable mapped privately for Kyty itself: made visible to the GPU.
+void HybridMapPrivate(uint64_t vaddr, uint64_t size);
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)
