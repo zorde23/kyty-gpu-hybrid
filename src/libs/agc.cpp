@@ -4165,20 +4165,30 @@ int Initialize() {
 		return OK;
 	}
 	int64_t physical_offset = -1;
+	if (Hybrid::Enabled()) {
+		const auto map = Hybrid::Executable<int (*)(uint64_t, uint64_t, int64_t*)>("KytyGpuMapDriverMemory_nid_no_patch");
+		EXIT_IF(map == nullptr);
+		const auto result = map(DriverDmemBase, DriverDmemSize, &physical_offset);
+		if (result != OK) {
+			return result;
+		}
+	}
 	const auto allocate = Hybrid::Kernel("rTXw65xmLIA", &LibKernel::Memory::KernelAllocateDirectMemory);
 	const auto size     = Hybrid::Kernel("pO96TwzOm5E", &LibKernel::Memory::KernelGetDirectMemorySize);
 	const auto map      = Hybrid::Kernel("NcaWUxfMNIQ", &LibKernel::Memory::KernelMapNamedDirectMemory);
 	const auto release  = Hybrid::Kernel("MBuItvba6z8", &LibKernel::Memory::KernelReleaseDirectMemory);
 	EXIT_IF(allocate == nullptr || size == nullptr || map == nullptr || release == nullptr);
-	auto result = allocate(0, static_cast<int64_t>(size()), DriverDmemSize, DriverDmemSize, 12, &physical_offset);
-	if (result != OK) {
-		return result;
-	}
 	void* address = reinterpret_cast<void*>(DriverDmemBase);
-	result = map(&address, DriverDmemSize, 0x33, 0, physical_offset, DriverDmemSize, "SceAgcDriver");
-	if (result != OK) {
-		EXIT_IF(release(physical_offset, DriverDmemSize) != OK);
-		return result;
+	if (!Hybrid::Enabled()) {
+		auto result = allocate(0, static_cast<int64_t>(size()), DriverDmemSize, DriverDmemSize, 12, &physical_offset);
+		if (result != OK) {
+			return result;
+		}
+		result = map(&address, DriverDmemSize, 0x33, 0, physical_offset, DriverDmemSize, "SceAgcDriver");
+		if (result != OK) {
+			EXIT_IF(release(physical_offset, DriverDmemSize) != OK);
+			return result;
+		}
 	}
 	EXIT_IF(reinterpret_cast<uint64_t>(address) != DriverDmemBase);
 	std::memset(address, 0, DriverDmemSize);
@@ -4214,8 +4224,12 @@ int Initialize() {
 static void ReleaseDmem() {
 	std::scoped_lock lock {g_driver_dmem.mutex};
 	if (g_driver_dmem.physical_offset >= 0) {
-		const auto release = Hybrid::Kernel("MBuItvba6z8", &LibKernel::Memory::KernelReleaseDirectMemory);
-		EXIT_IF(release == nullptr || release(g_driver_dmem.physical_offset, DriverDmemSize) != OK);
+		const auto release = Hybrid::Enabled()
+		                         ? Hybrid::Executable<int (*)(int64_t, uint64_t)>("KytyGpuReleaseDriverMemory_nid_no_patch")
+		                         : nullptr;
+		EXIT_IF(Hybrid::Enabled() ? release == nullptr || release(g_driver_dmem.physical_offset, DriverDmemSize) != OK
+		                          : LibKernel::Memory::KernelCheckedReleaseDirectMemory(g_driver_dmem.physical_offset,
+		                                                                               DriverDmemSize) != OK);
 		g_driver_dmem.physical_offset = -1;
 	}
 }

@@ -20,15 +20,6 @@ void SetHost(const Aps5Host* host) noexcept {
 	g_host.store(host, std::memory_order_release);
 }
 
-namespace {
-template <typename Function>
-Function Executable(const char* name) {
-	static_assert(sizeof(Function) == sizeof(uint64_t));
-	const auto* host = Host();
-	return host == nullptr ? nullptr : reinterpret_cast<Function>(host->resolve(name));
-}
-} // namespace
-
 // EBADF, as the executable answers for a queue it does not know.
 constexpr int BadQueue = static_cast<int>(0x80020009u);
 

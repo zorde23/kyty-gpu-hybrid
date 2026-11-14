@@ -30,6 +30,13 @@ int DeleteEvent(int64_t eq, uint64_t ident, int16_t filter);
 // it runs; nothing changes otherwise.
 void PadInjection(void* pad_data, uint64_t bytes);
 
+// One of the executable's own helpers by name (KytyGpu*_nid_no_patch), or null outside the hybrid.
+template <typename Function>
+Function Executable(const char* name) noexcept {
+	const auto* host = Host();
+	return host == nullptr ? nullptr : reinterpret_cast<Function>(host->resolve(name));
+}
+
 // In the hybrid, the executable's implementation of a kernel NID instead of Kyty's own `function`.
 template <typename Function>
 Function Kernel(const char* nid, Function function) noexcept {

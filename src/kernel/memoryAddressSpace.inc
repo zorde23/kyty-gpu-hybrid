@@ -299,6 +299,10 @@ public:
 #endif
 		const auto end   = vaddr + size;
 		auto       first = m_maps.upper_bound(vaddr);
+		if (m_borrowed && !CoveredUnlocked(vaddr, size)) {
+			std::memcpy(destination, reinterpret_cast<const void*>(vaddr), size);
+			return true;
+		}
 		if (first == m_maps.begin()) {
 			return false;
 		}
@@ -343,7 +347,7 @@ public:
 		}
 		const auto& entry = std::prev(mapping)->second;
 		if (vaddr < entry.vaddr || end > entry.vaddr + entry.size) {
-			return nullptr;
+			return m_borrowed && !CoveredUnlocked(vaddr, size) ? reinterpret_cast<const uint8_t*>(vaddr) : nullptr;
 		}
 		RememberMapping(entry, vaddr, end);
 		return At(entry.backing_offset + (vaddr - entry.vaddr));
@@ -573,6 +577,15 @@ private:
 		uint64_t            backing_offset = 0;
 		VirtualMemory::Mode mode           = VirtualMemory::Mode::NoAccess;
 	};
+
+	// Under m_mutex: whether any mapping overlaps the range.
+	[[nodiscard]] bool CoveredUnlocked(uint64_t vaddr, uint64_t size) const {
+		bool covered = false;
+		ForEachSparseRange(
+		    m_maps, vaddr, size, [&](const auto&, uint64_t, uint64_t) { covered = true; },
+		    [](uint64_t, uint64_t) {});
+		return covered;
+	}
 
 	[[nodiscard]] uint8_t* At(uint64_t backing_offset) const {
 		return m_borrowed ? reinterpret_cast<uint8_t*>(backing_offset) : m_backing_base + backing_offset;

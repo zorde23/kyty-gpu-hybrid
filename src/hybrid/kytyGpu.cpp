@@ -9,6 +9,7 @@
 #include "kernel/pthread.h"
 #include "libs/agc.h"
 #include "libs/controller.h"
+#include "graphics/presentation/window.h"
 #include "hybrid/hybrid.h"
 #include "kernel/memory.h"
 #include "libs/libs.h"
@@ -17,6 +18,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <future>
+#include <thread>
 #include <mutex>
 #include <string>
 
@@ -91,17 +94,30 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 		    }
 		    Hybrid::SetHost(host);
 		    // What the emulator's Init runs, minus the loader, network, file system and audio, which the
-		    // executable owns. Runs on the executable's startup thread, before any guest code.
-		    Common::InitializeThreads();
-		    static Common::Subsystems subsystems(false);
-		    subsystems.Initialize<Config::Lifecycle>();
-		    Config::Load(Config::ConfigOptions {});
-		    subsystems.Initialize<Log::Lifecycle>();
-		    subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
-		    subsystems.Initialize<Profiler::Lifecycle>();
-		    subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
-		    subsystems.Initialize<Libs::Controller::Lifecycle>();
-		    subsystems.Initialize<Libs::Graphics::Lifecycle>();
+		    // executable owns, on a thread of the DLL that stays in the window loop as the emulator's main
+		    // thread does. The executable's startup thread waits until the subsystems are up.
+		    std::promise<void> started;
+		    auto               ready = started.get_future();
+		    std::thread([started = std::move(started)]() mutable {
+			    Common::InitializeThreads();
+			    static Common::Subsystems subsystems(false);
+			    subsystems.Initialize<Config::Lifecycle>();
+			    Config::ConfigOptions options {};
+			    options.screen_width          = 1920;
+			    options.screen_height         = 1080;
+			    options.readback_tiled_images = true;
+			    Config::Load(options);
+			    subsystems.Initialize<Log::Lifecycle>();
+			    subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
+			    subsystems.Initialize<Profiler::Lifecycle>();
+			    subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
+			    subsystems.Initialize<Libs::Controller::Lifecycle>();
+			    subsystems.Initialize<Libs::Graphics::Lifecycle>();
+			    started.set_value();
+			    Libs::Graphics::WindowRun();
+			    std::quick_exit(0);
+		    }).detach();
+		    ready.wait();
 		    return true;
 	    },
 	    false);

@@ -3603,7 +3603,16 @@ bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size, VirtualMemory::Mode m
 		const uint32_t tracker = mode == VirtualMemory::Mode::NoAccess ? 2u
 		                         : (static_cast<uint32_t>(mode) & static_cast<uint32_t>(VirtualMemory::Mode::Write)) == 0 ? 1u
 		                                                                                                               : 0u;
-		return host->protect_host(vaddr, size, tracker);
+		if (!host->protect_host(vaddr, size, tracker)) {
+			static std::atomic<uint64_t> untracked {0};
+			if (untracked.fetch_add(1, std::memory_order_relaxed) == 0) {
+				std::fprintf(stderr,
+				             "[kyty-gpu] GPU tracking of memory the executable did not donate (first at 0x%" PRIx64
+				             ", %" PRIu64 " bytes): left untracked and read directly\n",
+				             vaddr, size);
+			}
+		}
+		return true;
 	}
 	return g_guest_address_space->ProtectTransient(vaddr, size, mode);
 }
