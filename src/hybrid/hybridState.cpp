@@ -1,5 +1,13 @@
 #include "hybrid/hybrid.h"
 
+#include "common/debugCounters.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <mutex>
+#include <vector>
+
 #include <atomic>
 
 namespace Hybrid {
@@ -44,6 +52,41 @@ void PadInjection(void* pad_data, uint64_t bytes) {
 	if (inject != nullptr) {
 		inject(0, pad_data, bytes);
 	}
+}
+
+void NoteFlip() {
+	if (!Enabled()) {
+		return;
+	}
+	using Clock = std::chrono::steady_clock;
+	static std::mutex              mutex;
+	static Clock::time_point       last {};
+	static Clock::time_point       period {};
+	static std::vector<double>     intervals;
+	static uint64_t                draws_before = 0;
+	std::lock_guard                lock(mutex);
+	const auto                     now = Clock::now();
+	if (period == Clock::time_point {}) {
+		Common::DebugCounters::SetEnabled(true); // draws/quadro needs the counter even without the overlay
+		period       = now;
+		draws_before = Common::DebugCounters::Get(Common::DebugCounters::Counter::Draws);
+	}
+	if (last != Clock::time_point {}) {
+		intervals.push_back(std::chrono::duration<double, std::milli>(now - last).count());
+	}
+	last = now;
+	if (now - period < std::chrono::seconds(10) || intervals.empty()) {
+		return;
+	}
+	std::sort(intervals.begin(), intervals.end());
+	const auto draws = Common::DebugCounters::Get(Common::DebugCounters::Counter::Draws);
+	const auto flips = intervals.size();
+	std::fprintf(stderr, "[hib-flip] 10 s: %zu flips, intervalo p50 %.1f ms p99 %.1f ms, draws/quadro %llu\n", flips,
+	             intervals[flips / 2], intervals[std::min(flips - 1, flips * 99 / 100)],
+	             static_cast<unsigned long long>((draws - draws_before) / flips));
+	intervals.clear();
+	period       = now;
+	draws_before = draws;
 }
 
 } // namespace Hybrid

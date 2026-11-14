@@ -3,6 +3,7 @@
 #include "common/debugCounters.h"
 #include "common/emulatorConfig.h"
 #include "common/hostStats.h"
+#include "common/logging/log.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "imgui.h"
 #include "kernel/memory.h"
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstdio>
 #include <mutex>
 #include <optional>
@@ -20,6 +22,7 @@
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace Libs::Graphics {
 
@@ -147,6 +150,17 @@ std::mutex            g_frame_mutex;
 FrameWindow           g_frames;
 std::atomic<uint64_t> g_generation {0};
 std::atomic<bool>     g_details {false};
+// The overlay is drawn only when shown; the counters also run for the [kyty-frames] log line.
+std::atomic<bool>     g_visible {false};
+
+// KYTY_FRAME_STATS=1: a [kyty-frames] line every 10 s, the same in pure Kyty and the hybrid DLL.
+bool FrameStatsOn() {
+	static const bool on = [] {
+		const char* value = std::getenv("KYTY_FRAME_STATS");
+		return value != nullptr && *value != '\0' && *value != '0';
+	}();
+	return on;
+}
 std::atomic<uint64_t> g_revision {0};
 
 std::mutex                  g_host_mutex;
@@ -163,7 +177,8 @@ void SetOverlayEnabled(bool enabled) {
 			g_frames = {};
 			g_generation.fetch_add(1, std::memory_order_release);
 		}
-		Common::DebugCounters::SetEnabled(enabled);
+		g_visible.store(enabled, std::memory_order_release);
+		Common::DebugCounters::SetEnabled(enabled || FrameStatsOn());
 	}
 	g_sampler_wait.notify_all();
 }
@@ -743,29 +758,82 @@ void DrawMemoryAndIo(const Snapshot& shown) {
 	}
 }
 
+// The frames of one [kyty-frames] window (presentation thread, under g_frame_mutex).
+struct FrameStatsWindow {
+	Clock::time_point  start;
+	Clock::time_point  last;
+	CounterTotals      base {};
+	std::vector<float> ms;
+};
+FrameStatsWindow g_frame_stats;
+
+void FrameStatsRecord(Clock::time_point now, const CounterTotals& totals) {
+	auto& w = g_frame_stats;
+	if (w.start == Clock::time_point {}) {
+		w.start = w.last = now;
+		w.base           = totals;
+		return;
+	}
+	w.ms.push_back(std::chrono::duration<float, std::milli>(now - w.last).count());
+	w.last = now;
+	if (now - w.start < HITCH_WINDOW) {
+		return;
+	}
+	const double seconds = std::chrono::duration<double>(now - w.start).count();
+	const double flips   = static_cast<double>(w.ms.size());
+	const auto   per_frame_ms = [&](Counter counter) {
+		return static_cast<double>(totals[static_cast<size_t>(counter)] -
+		                           w.base[static_cast<size_t>(counter)]) /
+		       1e6 / flips;
+	};
+	const auto per_frame = [&](Counter counter) { return per_frame_ms(counter) * 1e6; };
+	auto       sorted    = w.ms;
+	std::sort(sorted.begin(), sorted.end());
+	const auto at = [&](size_t percent) { return sorted[std::min(sorted.size() - 1, sorted.size() * percent / 100)]; };
+	Log::WriteToConsoleAndLog(fmt::format(
+	    "[kyty-frames] {:.1f} s: flips {}, fps {:.1f}, frame p50 {:.2f} p99 {:.2f} max {:.2f} ms, per frame: "
+	    "cp busy {:.2f} ms, gpu wait {:.2f} ms, present {:.2f} ms, compile {:.2f} ms, draws {:.0f}, dispatches {:.0f}\n",
+	    seconds, w.ms.size(), flips / seconds, at(50), at(99), sorted.back(),
+	    per_frame_ms(Counter::GpuThreadBusyNs), per_frame_ms(Counter::GpuWaitNs),
+	    per_frame_ms(Counter::PresentNs),
+	    per_frame_ms(Counter::ShaderCompileNs) + per_frame_ms(Counter::PipelineCreateNs),
+	    per_frame(Counter::Draws), per_frame(Counter::Dispatches)));
+	w.start = now;
+	w.base  = totals;
+	w.ms.clear();
+}
+
 } // namespace
 
 void PerformanceOverlayRecordFlip(uint32_t guest_width, uint32_t guest_height) noexcept {
+	if (FrameStatsOn() && !Common::DebugCounters::Enabled()) {
+		Common::DebugCounters::SetEnabled(true); // the first window starts here
+	}
 	if (!Common::DebugCounters::Enabled()) {
 		return;
 	}
 	std::scoped_lock lock(g_frame_mutex);
-	g_frames.Record(Clock::now(), ReadCounters());
+	const auto now    = Clock::now();
+	const auto totals = ReadCounters();
+	if (FrameStatsOn()) {
+		FrameStatsRecord(now, totals);
+	}
+	g_frames.Record(now, totals);
 	g_frames.guest_width  = guest_width;
 	g_frames.guest_height = guest_height;
 }
 
 bool PerformanceOverlayEnabled() noexcept {
-	return Common::DebugCounters::Enabled();
+	return g_visible.load(std::memory_order_acquire);
 }
 
 void TogglePerformanceOverlay() noexcept {
-	SetOverlayEnabled(!Common::DebugCounters::Enabled());
+	SetOverlayEnabled(!PerformanceOverlayEnabled());
 	g_revision.fetch_add(1, std::memory_order_acq_rel);
 }
 
 void TogglePerformanceOverlayDetails() noexcept {
-	if (Common::DebugCounters::Enabled()) {
+	if (PerformanceOverlayEnabled()) {
 		g_details.store(!g_details.load(std::memory_order_acquire), std::memory_order_release);
 	} else {
 		g_details.store(true, std::memory_order_release);

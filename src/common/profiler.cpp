@@ -1,15 +1,26 @@
 #include "common/profiler.h"
 
 #include "common/emulatorConfig.h"
+#include "hybrid/hybrid.h"
 
 #include <common/TracyProtocol.hpp>
 #include <common/TracyVersion.hpp>
 #include <cstdio>
 #include <tracy/Tracy.hpp>
 
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+#include <windows.h> // IWYU pragma: keep
+#endif
+
 namespace Profiler {
 
 void SetThreadName(const char* name) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	// The hybrid's crash and fault lines name threads by host id: say which id is which Kyty thread.
+	if (Hybrid::Enabled() && name != nullptr) {
+		std::fprintf(stderr, "[hib-thread] %s tid %lu\n", name, ::GetCurrentThreadId());
+	}
+#endif
 	if (tracy::ProfilerAvailable() && name != nullptr) {
 		tracy::SetThreadName(name);
 	}

@@ -793,6 +793,7 @@ void VideoOutDriver::Impl::VblankEnd() {
 }
 
 void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
+	KYTY_PROFILER_THREAD("Thread_Present");
 	using Clock       = std::chrono::steady_clock;
 	const auto period = Clock::duration(std::chrono::seconds(1)) / Config::GetVblankFrequency();
 
@@ -1188,6 +1189,7 @@ bool FlipQueue::Flip() {
 	if (due) {
 		Graphics::RenderDocOnGuestFlip(m_presenter.Renderer());
 		Graphics::TargetDump::OnFlip();
+		Hybrid::NoteFlip();
 		if (Config::GraphicsDebugDumpEnabled() &&
 		    Config::GetPrintfDirection() != Config::LogDirection::Silent) {
 			LOGF("Flip done: %d\n", requests[0].index);

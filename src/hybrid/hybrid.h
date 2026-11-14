@@ -30,6 +30,10 @@ int DeleteEvent(int64_t eq, uint64_t ident, int16_t filter);
 // it runs; nothing changes otherwise.
 void PadInjection(void* pad_data, uint64_t bytes);
 
+// At each guest flip: every 10 s a [hib-flip] line (flips, interval p50/p99, draws per frame; the bench reads the
+// draws to detect the world).
+void NoteFlip();
+
 // One of the executable's own helpers by name (KytyGpu*_nid_no_patch), or null outside the hybrid.
 template <typename Function>
 Function Executable(const char* name) noexcept {

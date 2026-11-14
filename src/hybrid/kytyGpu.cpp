@@ -113,6 +113,7 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 			    subsystems.Initialize<Log::Lifecycle>();
 			    subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
 			    subsystems.Initialize<Profiler::Lifecycle>();
+			    KYTY_PROFILER_THREAD("Thread_KytyMain");
 			    subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
 			    subsystems.Initialize<Libs::Controller::Lifecycle>();
 			    subsystems.Initialize<Libs::Graphics::Lifecycle>();
