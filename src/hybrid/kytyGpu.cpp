@@ -1,5 +1,5 @@
 // kyty_gpu.dll (hybrid step 0): the Kyty GPU libraries (Graphics5 = Agc, Graphics5Driver = AgcDriver,
-// VideoOut) as a DLL that the AnyPS5 executable resolves by NID. Step 0 only resolves; nothing here
+// VideoOut) and Pad (Kyty owns the window and its input) as a DLL that the AnyPS5 executable resolves by NID. Step 0 only resolves; nothing here
 // initializes the GPU, kernel or memory, so no export may be called yet.
 #include "libs/libs.h"
 #include "loader/symbolDatabase.h"
@@ -10,6 +10,7 @@
 
 namespace Libs {
 LIB_DEFINE(InitAgcDriver_1);
+LIB_DEFINE(InitPad_1);
 namespace LibGen5 {
 LIB_DEFINE(InitVideoOut_1);
 } // namespace LibGen5
@@ -23,6 +24,7 @@ Loader::SymbolDatabase& Database() {
 	std::call_once(once, [] {
 		Libs::InitAgcDriver_1(&database);
 		Libs::LibGen5::InitVideoOut_1(&database);
+		Libs::InitPad_1(&database);
 	});
 	return database;
 }
