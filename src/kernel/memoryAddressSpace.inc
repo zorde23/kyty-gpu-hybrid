@@ -265,6 +265,28 @@ public:
 
 	[[nodiscard]] bool Borrowed() const { return m_borrowed; }
 
+	// The hybrid: writes the executable's mappings through Kyty's views (no fault on pages Kyty protects)
+	// and the rest in place; false, writing nothing, when part of the range is not readable by the host.
+	bool WriteBorrowed(uint64_t vaddr, const void* data, uint64_t size) {
+		std::shared_lock lock(m_mutex);
+		bool       ok     = true;
+		const auto source = static_cast<const uint8_t*>(data);
+		ForEachSparseRange(m_maps, vaddr, size, [](const auto&, uint64_t, uint64_t) {},
+		                   [&](uint64_t start, uint64_t bytes) { ok = ok && HostReadable(start, bytes); });
+		if (!ok) {
+			return false;
+		}
+		ForEachSparseRange(
+		    m_maps, vaddr, size,
+		    [&](const auto& entry, uint64_t start, uint64_t bytes) {
+			    std::memcpy(At(entry.backing_offset + start - entry.vaddr), source + (start - vaddr), bytes);
+		    },
+		    [&](uint64_t start, uint64_t bytes) {
+			    std::memcpy(reinterpret_cast<void*>(start), source + (start - vaddr), bytes);
+		    });
+		return true;
+	}
+
 	void ZeroRange(uint64_t backing_offset, uint64_t size) {
 		std::lock_guard lock(m_mutex);
 		std::memset(m_backing_base + backing_offset, 0, size);
@@ -962,6 +984,9 @@ public:
 
 	// Writes the backed bytes of a range that holds no private mappings.
 	bool TryWriteBacking(uint64_t vaddr, const void* data, uint64_t size) {
+		if (m_backing->Borrowed()) {
+			return m_backing->WriteBorrowed(vaddr, data, size);
+		}
 		if (!Owns(vaddr, size)) {
 			return false;
 		}
