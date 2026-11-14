@@ -10,7 +10,12 @@
 #include "libs/errno.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
 
 namespace Libs::Graphics {
 
@@ -61,7 +66,99 @@ VideoOut::VideoOutDriver& RenderContext::GetVideoOut() const {
 	return *m_video_out;
 }
 
+namespace {
+
+// KYTY_FAULT_STATS=1: a [kyty-faults] line every 10 s with the faults the caches resolve: writes and
+// reads, the cache that watched a written page, how many frames in a row each faulting page
+// faulted, and the handler's own time. Dry: it changes nothing the caches do.
+struct FaultStats {
+	struct Page {
+		int      frame  = -1;
+		uint32_t streak = 0;
+	};
+	std::mutex                            mutex;
+	std::unordered_map<uint64_t, Page>    pages;
+	std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+	uint64_t writes = 0, reads = 0, buffer = 0, texture = 0, both = 0, neither = 0;
+	uint64_t streak[4] {}; // write faults on pages faulting 1, 2-3, 4-9, >= 10 frames in a row
+	uint64_t handler_ns = 0;
+	uint64_t distinct   = 0;
+};
+
+bool FaultStatsOn() {
+	static const bool on = [] {
+		const char* value = std::getenv("KYTY_FAULT_STATS");
+		return value != nullptr && *value != '\0' && *value != '0';
+	}();
+	return on;
+}
+
+FaultStats g_fault_stats;
+
+void RecordFault(bool write, uint64_t vaddr, int frame, bool in_buffer, bool in_texture, uint64_t ns) {
+	auto&      f = g_fault_stats;
+	std::scoped_lock lock(f.mutex);
+	f.handler_ns += ns;
+	if (!write) {
+		++f.reads;
+	} else {
+		++f.writes;
+		(in_buffer && in_texture ? f.both : in_buffer ? f.buffer : in_texture ? f.texture : f.neither)++;
+		auto& page = f.pages[vaddr / TRACKER_PAGE_SIZE];
+		if (page.frame != frame) {
+			if (page.frame < 0) {
+				++f.distinct;
+			}
+			page.streak = page.frame == frame - 1 ? page.streak + 1 : 1;
+			page.frame  = frame;
+		}
+		f.streak[page.streak >= 10 ? 3 : page.streak >= 4 ? 2 : page.streak >= 2 ? 1 : 0]++;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if (now - f.start < std::chrono::seconds(10)) {
+		return;
+	}
+	const double seconds = std::chrono::duration<double>(now - f.start).count();
+	const auto   faults  = f.writes + f.reads;
+	std::fprintf(stderr,
+	             "[kyty-faults] %.1f s: write %llu read %llu; write owner buffer %llu texture %llu both %llu "
+	             "other %llu; write by frames in a row 1:%llu 2-3:%llu 4-9:%llu >=10:%llu (>=4: %.1f%%); "
+	             "new pages %llu; handler %.2f us/fault
+",
+	             seconds, static_cast<unsigned long long>(f.writes), static_cast<unsigned long long>(f.reads),
+	             static_cast<unsigned long long>(f.buffer), static_cast<unsigned long long>(f.texture),
+	             static_cast<unsigned long long>(f.both), static_cast<unsigned long long>(f.neither),
+	             static_cast<unsigned long long>(f.streak[0]), static_cast<unsigned long long>(f.streak[1]),
+	             static_cast<unsigned long long>(f.streak[2]), static_cast<unsigned long long>(f.streak[3]),
+	             f.writes != 0 ? 100.0 * static_cast<double>(f.streak[2] + f.streak[3]) / static_cast<double>(f.writes) : 0.0,
+	             static_cast<unsigned long long>(f.distinct),
+	             faults != 0 ? static_cast<double>(f.handler_ns) / 1e3 / static_cast<double>(faults) : 0.0);
+	f.start  = now;
+	f.writes = f.reads = f.buffer = f.texture = f.both = f.neither = f.handler_ns = f.distinct = 0;
+	std::fill(std::begin(f.streak), std::end(f.streak), 0);
+}
+
+} // namespace
+
 bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
+	if (FaultStatsOn()) {
+		const auto start = std::chrono::steady_clock::now();
+		const bool write = access == PageFaultAccess::Write;
+		const bool in_buffer  = write && m_buffer_cache.IsRegionRegistered(fault_vaddr & ~(TRACKER_PAGE_SIZE - 1), TRACKER_PAGE_SIZE);
+		const bool in_texture = write && m_texture_cache.IsRegionRegistered(fault_vaddr & ~(TRACKER_PAGE_SIZE - 1), TRACKER_PAGE_SIZE);
+		const bool handled = HandleFaultUncounted(access, fault_vaddr);
+		if (handled) {
+			RecordFault(write, fault_vaddr, m_gpu != nullptr ? m_gpu->GetFrameNum() : 0, in_buffer, in_texture,
+			            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			                                      std::chrono::steady_clock::now() - start)
+			                                      .count()));
+		}
+		return handled;
+	}
+	return HandleFaultUncounted(access, fault_vaddr);
+}
+
+bool RenderContext::HandleFaultUncounted(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
 	// The host reports the faulting byte, not the instruction's access width. Both caches
 	// resolve its page; guessing a width can cross the end of a valid guest mapping.
 	constexpr uint64_t fault_size = 1;

@@ -63,6 +63,7 @@ public:
 	LodStatsCounter&    GetLodStats() { return m_lod_stats; }
 
 	[[nodiscard]] bool HandleFault(PageFaultAccess access, uint64_t fault_vaddr) noexcept;
+	bool HandleFaultUncounted(PageFaultAccess access, uint64_t fault_vaddr) noexcept;
 	// Before the emulated GPU writes guest memory (labels, WRITE_DATA): resolves a tracked page
 	// as its write fault would, without raising the exception.
 	void PrepareGpuWrite(const void* destination, uint64_t size) noexcept;
