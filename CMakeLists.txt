@@ -1030,6 +1030,16 @@ endif()
 add_executable(kyty_emulator "${KYTY_SOURCE_DIR}/main.cpp" ${kyty_emulator_src})
 configure_macos_guest_address_space(kyty_emulator)
 
+# Hybrid step 0: the GPU libraries as a DLL resolved by NID from the AnyPS5 executable.
+if (WIN32)
+	add_library(kyty_gpu SHARED EXCLUDE_FROM_ALL "${KYTY_SOURCE_DIR}/hybrid/kytyGpu.cpp" ${kyty_emulator_src})
+	target_link_libraries(kyty_gpu ${kyty_emulator_link_libraries} opengl32 iphlpapi setupapi ws2_32 dxgi ${CMAKE_DL_LIBS})
+	if (KYTY_CLANG_CL)
+		target_link_libraries(kyty_gpu onecore)
+	endif()
+	target_include_directories(kyty_gpu PRIVATE ${inc_headers})
+endif()
+
 set(KYTY_TROPHY_UNLOCK_SOUND "${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/trophy-unlock.wav")
 add_custom_target(kyty_trophy_sound
 	COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:kyty_emulator>/assets/sounds"
