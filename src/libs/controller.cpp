@@ -1,5 +1,7 @@
 #include "libs/controller.h"
 
+#include "hybrid/hybrid.h"
+
 #include <SDL3/SDL.h>
 #include "common/assert.h"
 #include "common/common.h"
@@ -1415,6 +1417,7 @@ int KYTY_SYSV_ABI PadReadState(int handle, PadData* data) {
 	PlayerForHandle(handle)->ReadState(&state, &connected, &connected_count);
 
 	pad_fill_data(data, state, connected, connected_count);
+	Hybrid::PadInjection(data, sizeof(PadData));
 
 	return OK;
 }
@@ -1449,6 +1452,7 @@ int KYTY_SYSV_ABI PadRead(int handle, PadData* data, int num) {
 	for (int i = 0; i < ret_num; i++) {
 		pad_fill_data(&data[i], states[i], connected, connected_count);
 	}
+	Hybrid::PadInjection(&data[0], sizeof(PadData));
 
 	return ret_num;
 }

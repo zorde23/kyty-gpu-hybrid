@@ -1,5 +1,7 @@
 #include "kernel/eventQueue.h"
 
+#include "hybrid/hybrid.h"
+
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/logging/log.h"
@@ -338,6 +340,11 @@ int KYTY_SYSV_ABI KernelCreateEqueue(KernelEqueue* eq, const char* name) {
 }
 
 int KYTY_SYSV_ABI KernelAddEvent(KernelEqueue eq, const KernelEqueueEvent& event) {
+	if (Hybrid::Enabled()) {
+		return Hybrid::AddEvent(eq, event.event.ident, event.event.filter, event.event.udata,
+		                        event.event.filter == KERNEL_EVFILT_VIDEO_OUT ? 1 : 0, event.triggered,
+		                        event.event.data);
+	}
 	auto owner = KernelPinEqueue(eq);
 	if (!owner) {
 		return KERNEL_ERROR_EBADF;
@@ -348,6 +355,9 @@ int KYTY_SYSV_ABI KernelAddEvent(KernelEqueue eq, const KernelEqueueEvent& event
 
 int KYTY_SYSV_ABI KernelTriggerEvent(KernelEqueue eq, uintptr_t ident, int16_t filter,
                                      void* trigger_data) {
+	if (Hybrid::Enabled()) {
+		return Hybrid::TriggerEvent(eq, ident, filter, trigger_data);
+	}
 	auto owner = KernelPinEqueue(eq);
 	if (!owner) {
 		return KERNEL_ERROR_EBADF;
@@ -357,6 +367,9 @@ int KYTY_SYSV_ABI KernelTriggerEvent(KernelEqueue eq, uintptr_t ident, int16_t f
 }
 
 int KYTY_SYSV_ABI KernelDeleteEvent(KernelEqueue eq, uintptr_t ident, int16_t filter) {
+	if (Hybrid::Enabled()) {
+		return Hybrid::DeleteEvent(eq, ident, filter);
+	}
 	auto owner = KernelPinEqueue(eq);
 	if (!owner) {
 		return KERNEL_ERROR_EBADF;

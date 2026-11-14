@@ -1,5 +1,7 @@
 #include "graphics/presentation/videoOut.h"
 
+#include "hybrid/hybrid.h"
+
 #include "common/abi.h"
 #include "common/assert.h"
 #include "common/common.h"
@@ -419,7 +421,7 @@ static int RegisterVideoOutEvent(int handle, EventQueue::KernelEqueue eq, VideoO
 	if (eq == EventQueue::KERNEL_EQUEUE_INVALID) {
 		return VIDEO_OUT_ERROR_INVALID_EVENT_QUEUE;
 	}
-	if (!EventQueue::KernelPinEqueue(eq)) {
+	if (!Hybrid::Enabled() && !EventQueue::KernelPinEqueue(eq)) {
 		return VIDEO_OUT_ERROR_INVALID_EVENT_QUEUE;
 	}
 	auto        event_state         = video_out->events;
@@ -477,7 +479,7 @@ static int DeleteVideoOutEvent(int handle, EventQueue::KernelEqueue eq, VideoOut
 	if (!video_out->opened) {
 		return VIDEO_OUT_ERROR_INVALID_HANDLE;
 	}
-	if (!EventQueue::KernelPinEqueue(eq)) {
+	if (!Hybrid::Enabled() && !EventQueue::KernelPinEqueue(eq)) {
 		return VIDEO_OUT_ERROR_INVALID_EVENT_QUEUE;
 	}
 	const int result = EventQueue::KernelDeleteEvent(eq, VideoOutEventId(kind),

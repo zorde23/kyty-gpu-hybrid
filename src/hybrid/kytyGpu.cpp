@@ -1,7 +1,14 @@
 // kyty_gpu.dll: the Kyty GPU libraries (Graphics5 = Agc, Graphics5Driver = AgcDriver, VideoOut) and Pad as a
 // DLL inside the AnyPS5 executable, which resolves them by NID and reports its guest memory to them. Every
 // export catches at the border: no exception crosses into the executable (hybrid requirement 8).
+#include "common/emulatorConfig.h"
 #include "common/logging/log.h"
+#include "common/profiler.h"
+#include "common/subsystems.h"
+#include "common/threads.h"
+#include "kernel/pthread.h"
+#include "libs/agc.h"
+#include "libs/controller.h"
 #include "hybrid/hybrid.h"
 #include "kernel/memory.h"
 #include "libs/libs.h"
@@ -78,11 +85,23 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 	Guarded(
 	    "kyty_gpu_init",
 	    [&]() -> bool {
-		    if (host == nullptr || host->version != 1) {
+		    if (host == nullptr || host->version != 2) {
 			    Failed("kyty_gpu_init", "unsupported host table");
 			    return false;
 		    }
 		    Hybrid::SetHost(host);
+		    // What the emulator's Init runs, minus the loader, network, file system and audio, which the
+		    // executable owns. Runs on the executable's startup thread, before any guest code.
+		    Common::InitializeThreads();
+		    static Common::Subsystems subsystems(false);
+		    subsystems.Initialize<Config::Lifecycle>();
+		    Config::Load(Config::ConfigOptions {});
+		    subsystems.Initialize<Log::Lifecycle>();
+		    subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
+		    subsystems.Initialize<Profiler::Lifecycle>();
+		    subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
+		    subsystems.Initialize<Libs::Controller::Lifecycle>();
+		    subsystems.Initialize<Libs::Graphics::Lifecycle>();
 		    return true;
 	    },
 	    false);

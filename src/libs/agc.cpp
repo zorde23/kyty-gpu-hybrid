@@ -1,4 +1,5 @@
 #include "libs/agc.h"
+#include "hybrid/hybrid.h"
 
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
@@ -4164,17 +4165,19 @@ int Initialize() {
 		return OK;
 	}
 	int64_t physical_offset = -1;
-	auto result = LibKernel::Memory::KernelAllocateDirectMemory(
-	    0, LibKernel::Memory::KernelGetDirectMemorySize(), DriverDmemSize, DriverDmemSize,
-	    12, &physical_offset);
+	const auto allocate = Hybrid::Kernel("rTXw65xmLIA", &LibKernel::Memory::KernelAllocateDirectMemory);
+	const auto size     = Hybrid::Kernel("pO96TwzOm5E", &LibKernel::Memory::KernelGetDirectMemorySize);
+	const auto map      = Hybrid::Kernel("NcaWUxfMNIQ", &LibKernel::Memory::KernelMapNamedDirectMemory);
+	const auto release  = Hybrid::Kernel("MBuItvba6z8", &LibKernel::Memory::KernelReleaseDirectMemory);
+	EXIT_IF(allocate == nullptr || size == nullptr || map == nullptr || release == nullptr);
+	auto result = allocate(0, static_cast<int64_t>(size()), DriverDmemSize, DriverDmemSize, 12, &physical_offset);
 	if (result != OK) {
 		return result;
 	}
 	void* address = reinterpret_cast<void*>(DriverDmemBase);
-	result = LibKernel::Memory::KernelMapNamedDirectMemory(
-	    &address, DriverDmemSize, 0x33, 0, physical_offset, DriverDmemSize, "SceAgcDriver");
+	result = map(&address, DriverDmemSize, 0x33, 0, physical_offset, DriverDmemSize, "SceAgcDriver");
 	if (result != OK) {
-		EXIT_IF(LibKernel::Memory::KernelCheckedReleaseDirectMemory(physical_offset, DriverDmemSize) != OK);
+		EXIT_IF(release(physical_offset, DriverDmemSize) != OK);
 		return result;
 	}
 	EXIT_IF(reinterpret_cast<uint64_t>(address) != DriverDmemBase);
@@ -4211,8 +4214,8 @@ int Initialize() {
 static void ReleaseDmem() {
 	std::scoped_lock lock {g_driver_dmem.mutex};
 	if (g_driver_dmem.physical_offset >= 0) {
-		EXIT_IF(LibKernel::Memory::KernelCheckedReleaseDirectMemory(
-		            g_driver_dmem.physical_offset, DriverDmemSize) != OK);
+		const auto release = Hybrid::Kernel("MBuItvba6z8", &LibKernel::Memory::KernelReleaseDirectMemory);
+		EXIT_IF(release == nullptr || release(g_driver_dmem.physical_offset, DriverDmemSize) != OK);
 		g_driver_dmem.physical_offset = -1;
 	}
 }
