@@ -25,6 +25,21 @@ static bool CoalescePlaceholders(uint64_t vaddr, uint64_t size) {
 }
 #endif
 
+// Whether the host has [vaddr, vaddr + size) committed and readable.
+static bool HostReadable(uint64_t vaddr, uint64_t size) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	for (uint64_t cursor = vaddr; cursor < vaddr + size;) {
+		MEMORY_BASIC_INFORMATION info {};
+		if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info, sizeof(info)) == 0 ||
+		    info.State != MEM_COMMIT || (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) != 0) {
+			return false;
+		}
+		cursor = reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize;
+	}
+#endif
+	return true;
+}
+
 template <typename Regions, typename Region, typename Gap>
 static void ForEachSparseRange(const Regions& regions, uint64_t vaddr, uint64_t size,
                                Region&& region, Gap&& gap) {
@@ -247,6 +262,8 @@ public:
 	}
 
 	[[nodiscard]] uint64_t GetBackingSize() const { return m_size; }
+
+	[[nodiscard]] bool Borrowed() const { return m_borrowed; }
 
 	void ZeroRange(uint64_t backing_offset, uint64_t size) {
 		std::lock_guard lock(m_mutex);
@@ -966,6 +983,18 @@ public:
 
 	template <bool copy_private>
 	bool CopySparseMemory(uint64_t vaddr, void* data, uint64_t size) {
+		if (data != nullptr && m_backing->Borrowed()) {
+			// The hybrid: the executable's mappings are read through their views, the rest in place where the
+			// host has it readable, zero elsewhere.
+			m_backing->ReadSparseBacking(vaddr, data, size, [](uint64_t start, uint8_t* destination, uint64_t bytes) {
+				if (!HostReadable(start, bytes)) {
+					std::memset(destination, 0, bytes);
+					return;
+				}
+				std::memcpy(destination, reinterpret_cast<const void*>(start), bytes);
+			});
+			return true;
+		}
 		if (data == nullptr || !Owns(vaddr, size)) {
 			return false;
 		}
