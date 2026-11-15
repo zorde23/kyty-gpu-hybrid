@@ -589,6 +589,7 @@ struct Target {
 	uint32_t     layer = 0;
 	vk::Extent2D extent {};
 	std::string  note;
+	bool         note_only = false; // index row without a read back
 };
 
 void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const Target> list,
@@ -612,7 +613,7 @@ void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const 
 		p.address      = image.info.data.address;
 		p.shaders      = shaders;
 		p.note         = target.note;
-		if (!ReadBack(context, buffer, image, target.kind, target.extent, p)) {
+		if (target.note_only || !ReadBack(context, buffer, image, target.kind, target.extent, p)) {
 			WriteRow(p, "");
 			continue;
 		}
@@ -763,8 +764,16 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 		}
 		// The stencil the draw tests or writes, for the draws dumped one by one.
 		const auto op = g_draw + 1;
-		if (depth->stencil_test_enable && op >= g_each_from && op <= g_each_to) {
+		const bool in_range = op >= g_each_from && op <= g_each_to;
+		if (depth->stencil_test_enable && in_range) {
 			list.push_back({depth->image_id, Kind::Stencil, 0, mip, depth->desc.view_info.base_layer, extent, note});
+		}
+		// Outside the range, every stencil write still gets a row, to find who writes a value.
+		const bool writes_stencil = depth->stencil_test_enable &&
+		                            (front.writeMask != 0 || depth->stencil_back.writeMask != 0);
+		if (writes_stencil && !in_range) {
+			list.push_back({depth->image_id, Kind::Stencil, 0, mip, depth->desc.view_info.base_layer, extent,
+			                note, true});
 		}
 	}
 	DumpTargets(context, buffer, list, pipeline, false);
