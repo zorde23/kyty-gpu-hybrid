@@ -5,6 +5,8 @@
 #include "common/common.h"
 #include "kernel/eventQueue.h"
 
+#include <vector>
+
 namespace Libs::Graphics {
 
 struct Shader;
@@ -15,6 +17,8 @@ struct ShaderRegister;
 void HybridGetTessellationState(uint64_t state[5]);
 void HybridSetTessellationState(const uint64_t state[5]);
 bool HybridInvalidateMemory(uint64_t vaddr, uint64_t size);
+void HybridCaptureRegisters(std::vector<uint64_t>& words);
+bool HybridRestoreRegisters(const uint64_t* words, const uint64_t* end);
 
 struct SizeAlign {
 	uint64_t m_size;

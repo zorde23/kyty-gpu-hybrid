@@ -53,6 +53,12 @@ void NoteFlip();
 // Guest flips presented so far (the frame capture ends a frame when it changes).
 [[nodiscard]] uint64_t FlipCount() noexcept;
 
+// F9 arms the executable's frame capture instead of the target dump when APS5_KYTY_CAPTURE_TRIGGER is "F9";
+// the capture takes the press once.
+[[nodiscard]] bool CaptureOnHotkey() noexcept;
+void               PressCaptureHotkey() noexcept;
+[[nodiscard]] bool TakeCaptureHotkey() noexcept;
+
 // One of the executable's own helpers by name (KytyGpu*_nid_no_patch), or null outside the hybrid.
 template <typename Function>
 Function Executable(const char* name) noexcept {

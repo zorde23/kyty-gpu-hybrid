@@ -29,6 +29,11 @@ public:
 	~GuestGpu();
 	KYTY_CLASS_NO_COPY(GuestGpu);
 
+	// The hybrid's frame capture: the register state of every command processor (context, user
+	// config, shader) as words, taken with the GPU idle and put back by the replay before its first frame.
+	void CaptureRegisters(std::vector<uint64_t>& words);
+	bool RestoreRegisters(const uint64_t* words, const uint64_t* end);
+
 	void               Shutdown();
 	[[nodiscard]] bool IsStopping();
 	void               SendCommand(Common::UniqueFunction<void>&& command);

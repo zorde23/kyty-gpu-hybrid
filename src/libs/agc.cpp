@@ -4277,6 +4277,16 @@ bool HybridInvalidateMemory(uint64_t vaddr, uint64_t size) {
 	return g_renderer != nullptr && g_renderer->InvalidateMemory(vaddr, size);
 }
 
+void HybridCaptureRegisters(std::vector<uint64_t>& words) {
+	if (g_renderer != nullptr) {
+		g_renderer->GetGpu().CaptureRegisters(words);
+	}
+}
+
+bool HybridRestoreRegisters(const uint64_t* words, const uint64_t* end) {
+	return g_renderer != nullptr && g_renderer->GetGpu().RestoreRegisters(words, end);
+}
+
 namespace Gen5Driver {
 
 static void submit_dcb(uint32_t* dcb, uint32_t size_in_dwords) {

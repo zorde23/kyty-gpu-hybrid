@@ -38,6 +38,7 @@
 #include <thread>
 #include <utility>
 #include <type_traits>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -278,6 +279,58 @@ void GuestGpu::SuspendPoint() {
 
 int GuestGpu::GetFrameNum() const {
 	return m_done_num;
+}
+
+namespace {
+
+template <typename State>
+void AppendWords(std::vector<uint64_t>& words, const State& state) {
+	static_assert(std::is_trivially_copyable_v<State>);
+	const auto at = words.size();
+	words.resize(at + (sizeof(State) + 7) / 8);
+	std::memcpy(words.data() + at, &state, sizeof(State));
+}
+
+template <typename State>
+bool TakeWords(const uint64_t*& words, const uint64_t* end, State& state) {
+	static_assert(std::is_trivially_copyable_v<State>);
+	const auto count = (sizeof(State) + 7) / 8;
+	if (static_cast<uint64_t>(end - words) < count) {
+		return false;
+	}
+	std::memcpy(&state, words, sizeof(State));
+	words += count;
+	return true;
+}
+
+} // namespace
+
+void GuestGpu::CaptureRegisters(std::vector<uint64_t>& words) {
+	for (uint32_t queue = 0; queue < QueueCount; queue++) {
+		auto* processor = queue == 0 ? m_gfx_cp.get() : m_compute_cp[queue - 1].get();
+		if (processor == nullptr) {
+			continue;
+		}
+		words.push_back(queue);
+		AppendWords(words, processor->GetCtx());
+		AppendWords(words, processor->GetUcfg());
+		AppendWords(words, processor->GetShCtx());
+	}
+}
+
+bool GuestGpu::RestoreRegisters(const uint64_t* words, const uint64_t* end) {
+	while (words < end) {
+		const auto queue = static_cast<uint32_t>(*words++);
+		if (queue >= QueueCount) {
+			return false;
+		}
+		auto& processor = GetProcessor(queue);
+		if (!TakeWords(words, end, processor.GetCtx()) || !TakeWords(words, end, processor.GetUcfg()) ||
+		    !TakeWords(words, end, processor.GetShCtx())) {
+			return false;
+		}
+	}
+	return true;
 }
 
 CommandProcessor& GuestGpu::GetProcessor(uint32_t queue_id) {

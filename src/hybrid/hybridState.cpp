@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <string_view>
 #include <array>
 #include <string>
 #include <mutex>
@@ -272,6 +274,27 @@ uint64_t FaultStageClockNs() noexcept {
 namespace {
 std::atomic<uint64_t> g_flip_count {0};
 } // namespace
+
+namespace {
+std::atomic<bool> g_capture_hotkey {false};
+} // namespace
+
+bool CaptureOnHotkey() noexcept {
+	static const bool on_hotkey = [] {
+		const char* trigger = std::getenv("APS5_KYTY_CAPTURE_TRIGGER");
+		return trigger != nullptr && std::string_view(trigger) == "F9";
+	}();
+	return on_hotkey;
+}
+
+void PressCaptureHotkey() noexcept {
+	g_capture_hotkey.store(true, std::memory_order_release);
+	std::fputs("[kyty-gpu] F9: frame capture armed\n", stderr);
+}
+
+bool TakeCaptureHotkey() noexcept {
+	return g_capture_hotkey.exchange(false, std::memory_order_acq_rel);
+}
 
 uint64_t FlipCount() noexcept {
 	return g_flip_count.load(std::memory_order_acquire);

@@ -245,7 +245,11 @@ static void GameEventKeyboard(const EventKeyboard& key) {
 				break;
 			case SDLK_F9:
 				if (!key.repeat) {
-					TargetDump::RequestCapture();
+					if (Hybrid::CaptureOnHotkey()) {
+						Hybrid::PressCaptureHotkey();
+					} else {
+						TargetDump::RequestCapture();
+					}
 				}
 				break;
 			case SDLK_F11:

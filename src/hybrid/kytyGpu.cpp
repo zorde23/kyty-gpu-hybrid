@@ -246,6 +246,11 @@ extern "C" __declspec(dllexport) uint64_t kyty_gpu_flip_count() {
 	return Hybrid::FlipCount();
 }
 
+// The executable's frame capture: whether F9 was pressed since the last call (APS5_KYTY_CAPTURE_TRIGGER=F9).
+extern "C" __declspec(dllexport) bool kyty_gpu_take_capture_hotkey() {
+	return Hybrid::TakeCaptureHotkey();
+}
+
 extern "C" __declspec(dllexport) void kyty_gpu_wait_idle() {
 	Guarded(
 	    "kyty_gpu_wait_idle",
@@ -264,7 +269,7 @@ extern "C" __declspec(dllexport) void kyty_gpu_request_target_dump() {
 
 // The executable's frame capture: Kyty's state from the calls made before it starts (mapped shaders,
 // tessellation rings, video out ports) as words, written with the GPU idle and put back by the replay.
-constexpr uint64_t CaptureStateMagic = 0x3154535954594bull; // "KYTYST1"
+constexpr uint64_t CaptureStateMagic = 0x3254535954594bull; // "KYTYST2"
 
 extern "C" __declspec(dllexport) uint64_t kyty_gpu_capture_state(uint64_t* out, uint64_t capacity) {
 	return Guarded(
@@ -280,6 +285,10 @@ extern "C" __declspec(dllexport) uint64_t kyty_gpu_capture_state(uint64_t* out, 
 		    uint64_t tessellation[5] {};
 		    Libs::Graphics::HybridGetTessellationState(tessellation);
 		    words.insert(words.end(), std::begin(tessellation), std::end(tessellation));
+		    const auto registers_at = words.size();
+		    words.push_back(0);
+		    Libs::Graphics::HybridCaptureRegisters(words);
+		    words[registers_at] = words.size() - registers_at - 1;
 		    Libs::VideoOut::HybridCaptureState(words);
 		    if (out != nullptr && capacity >= words.size()) {
 			    std::copy(words.begin(), words.end(), out);
@@ -312,6 +321,13 @@ extern "C" __declspec(dllexport) bool kyty_gpu_restore_state(const uint64_t* wor
 		    Libs::Graphics::HybridSetTessellationState(at);
 		    at += 5;
 		    std::fputs("[kyty-gpu] restore: tessellation rings set\n", stderr);
+		    const auto registers = at < words + count ? *at++ : 0;
+		    if (registers > static_cast<uint64_t>(words + count - at) || !Libs::Graphics::HybridRestoreRegisters(at, at + registers)) {
+			    std::fputs("[kyty-gpu] restore: the command processor registers do not match this DLL\n", stderr);
+			    return false;
+		    }
+		    at += registers;
+		    std::fprintf(stderr, "[kyty-gpu] restore: command processor registers set (%llu words)\n", static_cast<unsigned long long>(registers));
 		    const bool restored = Libs::VideoOut::HybridRestoreState(at, words + count);
 		    std::fprintf(stderr, "[kyty-gpu] restored %llu shaders, the tessellation rings and the video out ports: %s\n",
 		                 static_cast<unsigned long long>(words[1]), restored ? "ok" : "FAILED");
