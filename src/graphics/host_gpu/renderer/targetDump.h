@@ -20,6 +20,10 @@ void Init();
 void RequestCapture() noexcept;
 // Starts the dump with the next draw instead of the next flip (the frame capture calls it with the GPU idle).
 void StartCapture() noexcept;
+// While a dump is requested or running, no draw is skipped while its pipeline compiles in the
+// background: the draw waits (the replay and the game's reference then render the same draws).
+[[nodiscard]] bool NoPipelineSkip() noexcept;
+void NoteWaitedPipeline() noexcept;
 // Called at each guest flip (presentation thread).
 void OnFlip() noexcept;
 // Called by the execution thread after a draw is recorded.

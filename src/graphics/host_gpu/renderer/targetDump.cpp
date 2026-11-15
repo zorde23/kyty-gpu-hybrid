@@ -37,6 +37,7 @@ uint32_t              g_each_from = 1;   // draws dumped one by one (KYTY_TARGET
 uint32_t              g_each_to   = 0;
 std::atomic<State>    g_state {State::Idle};
 std::atomic<uint32_t> g_flips {0};
+std::atomic<uint32_t> g_waited {0};
 uint32_t              g_frame    = 0;
 uint32_t              g_draw     = 0;
 std::FILE*            g_index    = nullptr;
@@ -283,9 +284,20 @@ void StartCapture() noexcept {
 	}
 }
 
+bool NoPipelineSkip() noexcept {
+	return g_enabled && g_state.load(std::memory_order_acquire) != State::Idle;
+}
+
+void NoteWaitedPipeline() noexcept {
+	g_waited.fetch_add(1, std::memory_order_relaxed);
+}
+
 void OnFlip() noexcept {
 	if (!g_enabled) {
 		return;
+	}
+	if (const auto waited = g_waited.exchange(0); waited != 0) {
+		Log::WriteToConsoleAndLog(fmt::format("Target dump: {} draws waited for their pipelines instead of being skipped\n", waited));
 	}
 	const auto flips = g_flips.fetch_add(1) + 1;
 	if (g_at_flip != 0 && flips == g_at_flip) {

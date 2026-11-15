@@ -18,6 +18,7 @@
 #include "graphics/host_gpu/renderer/pipeline/blendMapping.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/Tessellation.h"
@@ -2254,7 +2255,12 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(const CommandBuffer&
 			}
 			if (allow_async) {
 				if (!wait_until || std::chrono::steady_clock::now() >= *wait_until) {
-					return nullptr;
+					if (!TargetDump::NoPipelineSkip()) {
+						return nullptr;
+					}
+					TargetDump::NoteWaitedPipeline();
+					allow_async = false;
+					continue;
 				}
 				lock.unlock();
 				std::this_thread::yield();
