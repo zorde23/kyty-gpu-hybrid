@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <string>
 #include <mutex>
 #include <vector>
@@ -67,6 +68,64 @@ std::atomic<uint64_t> g_query_calls {0}, g_query_ns {0}, g_cp_query_calls {0}, g
 thread_local bool     t_is_cp = false;
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 std::atomic<HANDLE> g_cp_thread {nullptr};
+
+// Sampled (1 of 16) VirtualQuery callers: three frames above the query helper, and the calling thread.
+struct Tallies {
+	std::mutex                                            mutex;
+	std::vector<std::pair<std::array<uint64_t, 3>, std::pair<uint64_t, uint64_t>>> rows;
+};
+Tallies g_query_sites, g_query_threads;
+
+void Tally(Tallies& tallies, const std::array<uint64_t, 3>& key, uint64_t ns) {
+	std::scoped_lock lock(tallies.mutex);
+	for (auto& [k, value]: tallies.rows) {
+		if (k == key) {
+			value.first++;
+			value.second += ns;
+			return;
+		}
+	}
+	if (tallies.rows.size() < 256) {
+		tallies.rows.push_back({key, {1, ns}});
+	}
+}
+
+std::string Symbol(uint64_t address) {
+	if (address == 0) {
+		return "-";
+	}
+	HMODULE module = nullptr;
+	char    path[MAX_PATH] = "?";
+	if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCSTR>(address), &module) && module != nullptr) {
+		GetModuleFileNameA(module, path, MAX_PATH);
+	}
+	const char* file = std::strrchr(path, '\\');
+	char        text[MAX_PATH + 32];
+	std::snprintf(text, sizeof(text), "%s+0x%llx", file != nullptr ? file + 1 : path, static_cast<unsigned long long>(address - reinterpret_cast<uint64_t>(module)));
+	return text;
+}
+
+void ReportCallers() {
+	for (auto* tallies: {&g_query_sites, &g_query_threads}) {
+		std::vector<std::pair<std::array<uint64_t, 3>, std::pair<uint64_t, uint64_t>>> rows;
+		{
+			std::scoped_lock lock(tallies->mutex);
+			rows.swap(tallies->rows);
+		}
+		std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second.second > b.second.second; });
+		std::string line = tallies == &g_query_sites ? "[hib-cp] VirtualQuery callers (sampled 1/16; calls, ms, 3 frames):" : "[hib-cp] VirtualQuery threads (sampled 1/16; tid, calls, ms):";
+		for (size_t i = 0; i < rows.size() && i < 8; ++i) {
+			char item[64];
+			std::snprintf(item, sizeof(item), " %llu %.2f", static_cast<unsigned long long>(rows[i].second.first), static_cast<double>(rows[i].second.second) / 1e6);
+			if (tallies == &g_query_sites) {
+				line += item + std::string(" ") + Symbol(rows[i].first[0]) + " < " + Symbol(rows[i].first[1]) + " < " + Symbol(rows[i].first[2]) + ";";
+			} else {
+				line += " " + std::to_string(rows[i].first[0]) + item + ";";
+			}
+		}
+		std::fprintf(stderr, "%s\n", line.c_str());
+	}
+}
 
 void ReportThreads(uint64_t frames) {
 	static std::unordered_map<DWORD, uint64_t> previous;
@@ -162,13 +221,28 @@ void ReportHostQueries(uint64_t frames) {
 	             per(cp_calls), per(cp_ns) / 1e6, per(calls), per(ns) / 1e6, static_cast<unsigned long long>(processors), affinity, ideal);
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	ReportThreads(frames);
+	ReportCallers();
 #endif
 }
 } // namespace
 
 void NoteHostQuery(uint64_t ns) noexcept {
-	g_query_calls.fetch_add(1, std::memory_order_relaxed);
+	const auto call = g_query_calls.fetch_add(1, std::memory_order_relaxed);
 	g_query_ns.fetch_add(ns, std::memory_order_relaxed);
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	if (call % 16 == 0) {
+		void* frames[4] {};
+		const auto captured = RtlCaptureStackBackTrace(1, 4, frames, nullptr);
+		std::array<uint64_t, 3> site {};
+		for (USHORT i = 1; i < captured && i < 4; ++i) {
+			site[i - 1] = reinterpret_cast<uint64_t>(frames[i]);
+		}
+		Tally(g_query_sites, site, ns);
+		Tally(g_query_threads, std::array<uint64_t, 3> {GetCurrentThreadId(), 0, 0}, ns);
+	}
+#else
+	static_cast<void>(call);
+#endif
 	if (t_is_cp) {
 		g_cp_query_calls.fetch_add(1, std::memory_order_relaxed);
 		g_cp_query_ns.fetch_add(ns, std::memory_order_relaxed);

@@ -7,6 +7,7 @@
 #include <common/TracyVersion.hpp>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <tracy/Tracy.hpp>
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
@@ -23,6 +24,12 @@ void SetThreadName(const char* name) {
 			Hybrid::SetCpThread();
 		}
 		std::fprintf(stderr, "[hib-thread] %s tid %lu\n", name, ::GetCurrentThreadId());
+		using Describe = HRESULT(WINAPI*)(HANDLE, PCWSTR);
+		static const auto describe = reinterpret_cast<Describe>(reinterpret_cast<void*>(::GetProcAddress(::GetModuleHandleA("kernel32.dll"), "SetThreadDescription")));
+		if (describe != nullptr) {
+			const std::wstring wide(name, name + std::strlen(name));
+			describe(::GetCurrentThread(), wide.c_str());
+		}
 	}
 #endif
 	if (tracy::ProfilerAvailable() && name != nullptr) {
