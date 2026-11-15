@@ -352,7 +352,10 @@ CommandProcessor& GuestGpu::GetProcessor(uint32_t queue_id) {
 uint64_t GuestGpu::EmitOperation(GpuOperation&& operation) {
 	const auto sequence = ++m_emitted;
 	operation.sequence  = sequence;
-	m_operations.Push(std::move(operation));
+	{
+		Common::DebugCounters::StageTimer push(Common::DebugCounters::Counter::StageCpPushTicks);
+		m_operations.Push(std::move(operation));
+	}
 	return sequence;
 }
 
@@ -437,7 +440,10 @@ void GuestGpu::ExecutionThread() {
 				continue;
 			}
 		}
-		operation->processor->Execute(*operation);
+		{
+			Common::DebugCounters::StageTimer work(Common::DebugCounters::Counter::StageExecuteTicks);
+			operation->processor->Execute(*operation);
+		}
 		const auto sequence = operation->sequence;
 		// Destroy the callback before the command processor may reuse what it references.
 		operation.reset();
@@ -466,6 +472,8 @@ void GuestGpu::ResolveThread() {
 				break;
 			}
 		}
+		std::optional<Common::DebugCounters::StageTimer> work;
+		work.emplace(Common::DebugCounters::Counter::StageResolveTicks);
 		if (operation->kind == GpuOperationKind::DrawIndex ||
 		    operation->kind == GpuOperationKind::DrawAuto) {
 			// The register snapshots stay valid until the operation executed.
@@ -496,6 +504,8 @@ void GuestGpu::ResolveThread() {
 			    operation->dispatch.args_addr,
 			    operation->processor->IsAsyncComputeQueue());
 		}
+		work.reset();
+		Common::DebugCounters::StageTimer push(Common::DebugCounters::Counter::StageResolvePushTicks);
 		m_resolved.Push(std::move(*operation));
 	}
 	m_resolved.Stop();

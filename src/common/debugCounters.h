@@ -4,6 +4,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <x86intrin.h>
 
 namespace Common::DebugCounters {
 
@@ -52,6 +54,13 @@ enum class Counter {
 	PresentNs, // Includes image acquire and overlay preparation.
 	PresentAcquireNs,
 	OverlayNs,
+	// KYTY_STAGE_TIMES=1: TSC ticks each GPU stage spends working (not waiting for its input) and
+	// blocked pushing to the next stage; the [kyty-frames] line converts them to ms.
+	StageCpPushTicks,
+	StageResolveTicks,
+	StageResolvePushTicks,
+	StageExecuteTicks,
+	StageRecordTicks,
 	Count
 };
 
@@ -113,6 +122,32 @@ private:
 	Counter                               m_duration;
 	Peak                                  m_peak;
 	std::chrono::steady_clock::time_point m_start;
+};
+
+[[nodiscard]] inline bool StageTimesEnabled() noexcept {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_STAGE_TIMES");
+		return value != nullptr && value[0] == '1';
+	}();
+	return enabled;
+}
+
+// Cheaper than ScopedTimer (a TSC read each side): one runs per draw on each GPU stage.
+class StageTimer final {
+public:
+	explicit StageTimer(Counter ticks)
+	    : m_ticks(ticks), m_start(StageTimesEnabled() && Enabled() ? __rdtsc() : 0) {}
+	~StageTimer() {
+		if (m_start != 0) {
+			Add(m_ticks, __rdtsc() - m_start);
+		}
+	}
+	StageTimer(const StageTimer&)            = delete;
+	StageTimer& operator=(const StageTimer&) = delete;
+
+private:
+	Counter  m_ticks;
+	uint64_t m_start;
 };
 
 [[nodiscard]] inline uint64_t Get(Counter counter) noexcept {

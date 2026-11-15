@@ -764,6 +764,7 @@ struct FrameStatsWindow {
 	Clock::time_point  last;
 	CounterTotals      base {};
 	std::vector<float> ms;
+	uint64_t           tsc = 0;
 };
 FrameStatsWindow g_frame_stats;
 
@@ -772,6 +773,7 @@ void FrameStatsRecord(Clock::time_point now, const CounterTotals& totals) {
 	if (w.start == Clock::time_point {}) {
 		w.start = w.last = now;
 		w.base           = totals;
+		w.tsc            = __rdtsc();
 		return;
 	}
 	w.ms.push_back(std::chrono::duration<float, std::milli>(now - w.last).count());
@@ -798,6 +800,21 @@ void FrameStatsRecord(Clock::time_point now, const CounterTotals& totals) {
 	    per_frame_ms(Counter::PresentNs),
 	    per_frame_ms(Counter::ShaderCompileNs) + per_frame_ms(Counter::PipelineCreateNs),
 	    per_frame(Counter::Draws), per_frame(Counter::Dispatches)));
+	if (Common::DebugCounters::StageTimesEnabled()) {
+		const auto tsc        = __rdtsc();
+		const auto ms_per_tick = seconds * 1e3 / static_cast<double>(tsc - w.tsc);
+		const auto stage_ms   = [&](Counter counter) {
+			return static_cast<double>(totals[static_cast<size_t>(counter)] - w.base[static_cast<size_t>(counter)]) *
+			       ms_per_tick / flips;
+		};
+		Log::WriteToConsoleAndLog(fmt::format(
+		    "[kyty-stages] per frame, working (not waiting for input): cp {:.2f} ms (of it blocked pushing {:.2f}), "
+		    "resolve {:.2f} ms (blocked pushing {:.2f}), execute {:.2f} ms, record {:.2f} ms (with submits)\n",
+		    per_frame_ms(Counter::GpuThreadBusyNs), stage_ms(Counter::StageCpPushTicks),
+		    stage_ms(Counter::StageResolveTicks), stage_ms(Counter::StageResolvePushTicks),
+		    stage_ms(Counter::StageExecuteTicks), stage_ms(Counter::StageRecordTicks)));
+		w.tsc = tsc;
+	}
 	w.start = now;
 	w.base  = totals;
 	w.ms.clear();

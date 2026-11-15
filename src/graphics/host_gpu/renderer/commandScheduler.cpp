@@ -524,6 +524,7 @@ void CommandScheduler::RecordingThread() {
 		if (chunk == nullptr) {
 			break;
 		}
+		Common::DebugCounters::StageTimer work(Common::DebugCounters::Counter::StageRecordTicks);
 		CommandStream::Replay(*chunk, acquire, [&](const CommandStream::Entry& entry) {
 			EXIT_IF(entry.kind != CommandStream::RecordKind::Submit);
 			SubmitRecorded(buffer, buffer_index,
