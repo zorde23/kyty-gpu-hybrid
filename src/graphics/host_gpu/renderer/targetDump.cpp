@@ -747,12 +747,17 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 		const vk::Extent2D extent {std::max(depth->desc.info.extent.width >> mip, 1u),
 		                           std::max(depth->desc.info.extent.height >> mip, 1u)};
 		const auto&        front  = depth->stencil_front;
-		const auto         note   = depth->stencil_test_enable
+		const auto         note_stencil = depth->stencil_test_enable
 		                                ? fmt::format("stencil {} ref 0x{:x} read 0x{:x} write 0x{:x} pass {}; ",
 		                                              vk::to_string(front.compareOp), front.reference,
 		                                              front.compareMask, front.writeMask,
 		                                              vk::to_string(front.passOp))
 		                                : std::string {};
+		// Pixel shader depth/stencil export state, to tell whether MRTZ carries the stencil.
+		const auto& sh   = buffer.GetRegisters().GetShaderRegisters();
+		const auto  note = note_stencil + fmt::format("db_shader_control 0x{:x} z_format {} sexp {}; ",
+		                                              sh.db_shader_control_raw, sh.spi_shader_z_format,
+		                                              state.ps_input_info.ps_stencil_export);
 		if (depth->depth_write_enable) {
 			list.push_back({depth->image_id, Kind::Depth, 0, mip, depth->desc.view_info.base_layer, extent, note});
 		}

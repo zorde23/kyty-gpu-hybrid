@@ -536,6 +536,9 @@ struct ShaderRegisters {
 	uint32_t m_cbShaderMask        = 0;
 
 	DepthShaderControl db_shader_control;
+	// Raw values kept only for the target dump note.
+	uint32_t           db_shader_control_raw = 0;
+	uint32_t           spi_shader_z_format   = 0;
 	bool               alpha_to_mask_enable = false;
 
 	// DB_SHADER_CONTROL.ALPHA_TO_MASK_DISABLE overrides DB_ALPHA_TO_MASK per shader.
@@ -831,6 +834,8 @@ public:
 	void SetDepthShaderControl(const DepthShaderControl& value) {
 		m_sh_regs.db_shader_control = value;
 	}
+	void SetDepthShaderControlRaw(uint32_t value) { m_sh_regs.db_shader_control_raw = value; }
+	void SetShaderZFormat(uint32_t value) { m_sh_regs.spi_shader_z_format = value; }
 	void SetAlphaToMaskEnable(bool value) { m_sh_regs.alpha_to_mask_enable = value; }
 
 private:

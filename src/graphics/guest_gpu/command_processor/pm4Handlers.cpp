@@ -1755,7 +1755,6 @@ static constexpr auto MakeContextIndirectTable() {
 	                             Pm4::VGT_REUSE_OFF,
 	                             Pm4::VGT_TESS_DISTRIBUTION,
 	                             Pm4::VGT_PRIMITIVEID_RESET,
-	                             Pm4::SPI_SHADER_Z_FORMAT,
 	                             Pm4::SPI_TMPRING_SIZE,
 	                             Pm4::PA_SC_FOV_WINDOW_LR,
 	                             Pm4::PA_SC_FOV_WINDOW_TB,
@@ -1833,8 +1832,10 @@ static constexpr auto MakeContextIndirectTable() {
 		db_shader_control.alpha_to_mask_disable =
 		    KYTY_PM4_GET(value, DB_SHADER_CONTROL, ALPHA_TO_MASK_DISABLE) != 0;
 		cp.GetCtx().SetDepthShaderControl(db_shader_control);
+		cp.GetCtx().SetDepthShaderControlRaw(value);
 	};
 
+	table[Pm4::SPI_SHADER_Z_FORMAT] = [](KYTY_HW_REG_ARGS) { cp.GetCtx().SetShaderZFormat(value); };
 	table[Pm4::CB_SHADER_MASK] = [](KYTY_HW_REG_ARGS) { cp.GetCtx().SetShaderMask(value); };
 	table[Pm4::CB_TARGET_MASK] = [](KYTY_HW_REG_ARGS) { cp.GetCtx().SetRenderTargetMask(value); };
 
