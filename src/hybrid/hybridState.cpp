@@ -5,10 +5,18 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
+#include <string>
 #include <mutex>
 #include <vector>
 
 #include <atomic>
+#include <unordered_map>
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+#include <windows.h> // IWYU pragma: keep
+#include <tlhelp32.h>
+#endif
 
 namespace Hybrid {
 
@@ -54,6 +62,132 @@ void PadInjection(void* pad_data, uint64_t bytes) {
 	}
 }
 
+namespace {
+std::atomic<uint64_t> g_query_calls {0}, g_query_ns {0}, g_cp_query_calls {0}, g_cp_query_ns {0}, g_cp_processors {0};
+thread_local bool     t_is_cp = false;
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+std::atomic<HANDLE> g_cp_thread {nullptr};
+
+void ReportThreads(uint64_t frames) {
+	static std::unordered_map<DWORD, uint64_t> previous;
+	struct Busy {
+		DWORD    tid;
+		uint64_t ns;
+		int      priority;
+		std::string name;
+		std::string start;
+	};
+	std::vector<Busy>                    busy;
+	std::unordered_map<DWORD, uint64_t> now;
+	const auto                           snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	if (snapshot == INVALID_HANDLE_VALUE) {
+		return;
+	}
+	using Describe = HRESULT(WINAPI*)(HANDLE, PWSTR*);
+	using Query    = LONG(WINAPI*)(HANDLE, int, PVOID, ULONG, PULONG);
+	static const auto describe = reinterpret_cast<Describe>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetThreadDescription")));
+	static const auto query    = reinterpret_cast<Query>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread")));
+	THREADENTRY32 entry {};
+	entry.dwSize = sizeof(entry);
+	for (BOOL more = Thread32First(snapshot, &entry); more; more = Thread32Next(snapshot, &entry)) {
+		if (entry.th32OwnerProcessID != GetCurrentProcessId()) {
+			continue;
+		}
+		const auto thread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID);
+		if (thread == nullptr) {
+			continue;
+		}
+		FILETIME created {}, exited {}, kernel {}, user {};
+		if (GetThreadTimes(thread, &created, &exited, &kernel, &user)) {
+			const auto total = ((static_cast<uint64_t>(kernel.dwHighDateTime) << 32u | kernel.dwLowDateTime) +
+			                    (static_cast<uint64_t>(user.dwHighDateTime) << 32u | user.dwLowDateTime)) * 100;
+			now[entry.th32ThreadID] = total;
+			const auto before = previous.find(entry.th32ThreadID);
+			Busy b {entry.th32ThreadID, total - (before != previous.end() ? before->second : 0), GetThreadPriority(thread), {}, {}};
+			PWSTR text = nullptr;
+			if (describe != nullptr && SUCCEEDED(describe(thread, &text)) && text != nullptr) {
+				for (const wchar_t* c = text; *c != 0; ++c) {
+					b.name += static_cast<char>(*c < 128 ? *c : '?');
+				}
+				LocalFree(text);
+			}
+			void* start = nullptr;
+			if (query != nullptr && query(thread, 9, &start, sizeof(start), nullptr) == 0 && start != nullptr) {
+				HMODULE module = nullptr;
+				char    path[MAX_PATH] = "?";
+				if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCSTR>(start), &module) && module != nullptr) {
+					GetModuleFileNameA(module, path, MAX_PATH);
+				}
+				const char* file = std::strrchr(path, '\\');
+				char        site[MAX_PATH + 32];
+				std::snprintf(site, sizeof(site), "%s+0x%llx", file != nullptr ? file + 1 : path, static_cast<unsigned long long>(reinterpret_cast<uint64_t>(start) - reinterpret_cast<uint64_t>(module)));
+				b.start = site;
+			}
+			busy.push_back(std::move(b));
+		}
+		CloseHandle(thread);
+	}
+	CloseHandle(snapshot);
+	previous = std::move(now);
+	std::sort(busy.begin(), busy.end(), [](const Busy& a, const Busy& b) { return a.ns > b.ns; });
+	std::string line = "[hib-cp] busiest threads (ms per frame, priority, name, start):";
+	for (size_t i = 0; i < busy.size() && i < 8; ++i) {
+		char item[512];
+		std::snprintf(item, sizeof(item), " %lu %.2f p%d %s %s;", busy[i].tid, frames != 0 ? static_cast<double>(busy[i].ns) / 1e6 / static_cast<double>(frames) : 0.0, busy[i].priority, busy[i].name.empty() ? "-" : busy[i].name.c_str(), busy[i].start.empty() ? "?" : busy[i].start.c_str());
+		line += item;
+	}
+	std::fprintf(stderr, "%s\n", line.c_str());
+}
+#endif
+
+void ReportHostQueries(uint64_t frames) {
+	const auto per = [frames](uint64_t value) { return frames != 0 ? static_cast<double>(value) / static_cast<double>(frames) : 0.0; };
+	const auto calls = g_query_calls.exchange(0), ns = g_query_ns.exchange(0), cp_calls = g_cp_query_calls.exchange(0), cp_ns = g_cp_query_ns.exchange(0);
+	const auto processors = g_cp_processors.exchange(0);
+	unsigned long long affinity = 0, ideal = 0;
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	if (const auto cp = g_cp_thread.load()) {
+		GROUP_AFFINITY group {};
+		PROCESSOR_NUMBER number {};
+		if (GetThreadGroupAffinity(cp, &group)) {
+			affinity = group.Mask;
+		}
+		if (GetThreadIdealProcessorEx(cp, &number)) {
+			ideal = number.Number;
+		}
+	}
+#endif
+	std::fprintf(stderr,
+	             "[hib-cp] per frame: VirtualQuery CP %.1f calls %.3f ms, all threads %.1f calls %.3f ms; CP ran on processors 0x%llx, affinity 0x%llx, ideal %llu\n",
+	             per(cp_calls), per(cp_ns) / 1e6, per(calls), per(ns) / 1e6, static_cast<unsigned long long>(processors), affinity, ideal);
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	ReportThreads(frames);
+#endif
+}
+} // namespace
+
+void NoteHostQuery(uint64_t ns) noexcept {
+	g_query_calls.fetch_add(1, std::memory_order_relaxed);
+	g_query_ns.fetch_add(ns, std::memory_order_relaxed);
+	if (t_is_cp) {
+		g_cp_query_calls.fetch_add(1, std::memory_order_relaxed);
+		g_cp_query_ns.fetch_add(ns, std::memory_order_relaxed);
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		g_cp_processors.fetch_or(uint64_t {1} << (GetCurrentProcessorNumber() & 63u), std::memory_order_relaxed);
+#endif
+	}
+}
+
+void SetCpThread() noexcept {
+	t_is_cp = true;
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	HANDLE self = nullptr;
+	if (DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &self, THREAD_QUERY_INFORMATION, FALSE, 0)) {
+		g_cp_thread.store(self);
+	}
+#endif
+}
+
 uint64_t FaultStageClockNs() noexcept {
 	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
@@ -88,6 +222,7 @@ void NoteFlip() {
 	std::fprintf(stderr, "[hib-flip] 10 s: %zu flips, intervalo p50 %.1f ms p99 %.1f ms, draws/quadro %llu\n", flips,
 	             intervals[flips / 2], intervals[std::min(flips - 1, flips * 99 / 100)],
 	             static_cast<unsigned long long>((draws - draws_before) / flips));
+	ReportHostQueries(flips);
 	intervals.clear();
 	period       = now;
 	draws_before = draws;

@@ -25,6 +25,11 @@ struct FaultStageTime {
 inline thread_local FaultStageTime g_fault_stage_time;
 [[nodiscard]] uint64_t FaultStageClockNs() noexcept;
 
+// [hib-cp] every 10 s with [hib-flip]: the host memory queries (VirtualQuery) of the borrowed-mode readers,
+// on all threads and on the CP (Thread_Gpu), the CP's processors and affinity, and the busiest threads.
+void NoteHostQuery(uint64_t ns) noexcept;
+void SetCpThread() noexcept;
+
 [[nodiscard]] bool            Enabled() noexcept;
 [[nodiscard]] const Aps5Host* Host() noexcept;
 void                          SetHost(const Aps5Host* host) noexcept;

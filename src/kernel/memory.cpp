@@ -1132,6 +1132,10 @@ bool TryReadAroundGpuWritesOnPage(uint64_t vaddr, void* data, uint64_t size,
 // answer from the ranges the executable reports (on_map/on_unmap/on_protect) instead of asking the system.
 static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size) {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	struct Timed {
+		uint64_t start = Hybrid::FaultStageClockNs();
+		~Timed() { Hybrid::NoteHostQuery(Hybrid::FaultStageClockNs() - start); }
+	} timed;
 	uint64_t readable = 0;
 	while (readable < size) {
 		MEMORY_BASIC_INFORMATION info {};

@@ -28,6 +28,10 @@ static bool CoalescePlaceholders(uint64_t vaddr, uint64_t size) {
 // Whether the host has [vaddr, vaddr + size) committed and readable.
 static bool HostReadable(uint64_t vaddr, uint64_t size) {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	struct Timed {
+		uint64_t start = Hybrid::FaultStageClockNs();
+		~Timed() { Hybrid::NoteHostQuery(Hybrid::FaultStageClockNs() - start); }
+	} timed;
 	for (uint64_t cursor = vaddr; cursor < vaddr + size;) {
 		MEMORY_BASIC_INFORMATION info {};
 		if (VirtualQuery(reinterpret_cast<const void*>(cursor), &info, sizeof(info)) == 0 ||

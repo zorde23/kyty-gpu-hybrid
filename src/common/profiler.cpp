@@ -6,6 +6,7 @@
 #include <common/TracyProtocol.hpp>
 #include <common/TracyVersion.hpp>
 #include <cstdio>
+#include <cstring>
 #include <tracy/Tracy.hpp>
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
@@ -18,6 +19,9 @@ void SetThreadName(const char* name) {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	// The hybrid's crash and fault lines name threads by host id: say which id is which Kyty thread.
 	if (Hybrid::Enabled() && name != nullptr) {
+		if (std::strcmp(name, "Thread_Gpu") == 0) {
+			Hybrid::SetCpThread();
+		}
 		std::fprintf(stderr, "[hib-thread] %s tid %lu\n", name, ::GetCurrentThreadId());
 	}
 #endif
