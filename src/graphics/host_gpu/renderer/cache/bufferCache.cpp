@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
+#include "hybrid/hybrid.h"
 
 #include "common/alignment.h"
 #include "gpu_tiler_shaders/buffer_scatter_spv.h"
@@ -334,7 +335,10 @@ void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size, bool guest_fau
 		if (!gpu_modified) {
 			return;
 		}
+		const auto readback_start = Hybrid::FaultStageClockNs();
 		ReadMemory(vaddr, size, true, guest_fault);
+		Hybrid::g_fault_stage_time.readback_ns += Hybrid::FaultStageClockNs() - readback_start;
+		Hybrid::g_fault_stage_time.readbacks++;
 	}
 }
 

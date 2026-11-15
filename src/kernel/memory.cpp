@@ -3653,7 +3653,11 @@ bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size, VirtualMemory::Mode m
 		const uint32_t tracker = mode == VirtualMemory::Mode::NoAccess ? 2u
 		                         : (static_cast<uint32_t>(mode) & static_cast<uint32_t>(VirtualMemory::Mode::Write)) == 0 ? 1u
 		                                                                                                               : 0u;
-		if (!host->protect_host(vaddr, size, tracker)) {
+		const auto protect_start = Hybrid::FaultStageClockNs();
+		const bool protected_host = host->protect_host(vaddr, size, tracker);
+		Hybrid::g_fault_stage_time.protect_ns += Hybrid::FaultStageClockNs() - protect_start;
+		Hybrid::g_fault_stage_time.protect_calls++;
+		if (!protected_host) {
 			static std::atomic<uint64_t> untracked {0};
 			if (untracked.fetch_add(1, std::memory_order_relaxed) == 0) {
 				std::fprintf(stderr,

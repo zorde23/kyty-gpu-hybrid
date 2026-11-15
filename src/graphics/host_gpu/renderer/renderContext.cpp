@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "hybrid/hybrid.h"
 
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
@@ -95,6 +96,25 @@ bool FaultStatsOn() {
 
 FaultStats g_fault_stats;
 
+struct StageTotals {
+	std::mutex            mutex;
+	Hybrid::FaultStageTime sum;
+};
+StageTotals g_stage_totals;
+
+void RecordStages(const Hybrid::FaultStageTime& before, const Hybrid::FaultStageTime& after) {
+	std::scoped_lock lock(g_stage_totals.mutex);
+	auto& s = g_stage_totals.sum;
+	s.protect_ns += after.protect_ns - before.protect_ns;
+	s.protect_calls += after.protect_calls - before.protect_calls;
+	s.readback_ns += after.readback_ns - before.readback_ns;
+	s.readbacks += after.readbacks - before.readbacks;
+	s.texture_lock_ns += after.texture_lock_ns - before.texture_lock_ns;
+	s.buffer_ns += after.buffer_ns - before.buffer_ns;
+	s.texture_ns += after.texture_ns - before.texture_ns;
+	s.heap_ns += after.heap_ns - before.heap_ns;
+}
+
 void RecordFault(bool write, uint64_t vaddr, int frame, bool in_buffer, bool in_texture, uint64_t ns) {
 	auto&      f = g_fault_stats;
 	std::scoped_lock lock(f.mutex);
@@ -132,6 +152,17 @@ void RecordFault(bool write, uint64_t vaddr, int frame, bool in_buffer, bool in_
 	             f.writes != 0 ? 100.0 * static_cast<double>(f.streak[2] + f.streak[3]) / static_cast<double>(f.writes) : 0.0,
 	             static_cast<unsigned long long>(f.distinct),
 	             faults != 0 ? static_cast<double>(f.handler_ns) / 1e3 / static_cast<double>(faults) : 0.0);
+	{
+		std::scoped_lock stage_lock(g_stage_totals.mutex);
+		auto&            s  = g_stage_totals.sum;
+		const auto       us = [&](uint64_t ns) { return f.writes != 0 ? static_cast<double>(ns) / 1e3 / static_cast<double>(f.writes) : 0.0; };
+		std::fprintf(stderr,
+		             "[kyty-fault-stages] per write fault: buffer %.2f us (readback %.2f us, %llu readbacks), texture %.2f us "
+		             "(lock wait %.2f us), image heap %.2f us; protect_host %.2f us in %llu calls\n",
+		             us(s.buffer_ns), us(s.readback_ns), static_cast<unsigned long long>(s.readbacks), us(s.texture_ns),
+		             us(s.texture_lock_ns), us(s.heap_ns), us(s.protect_ns), static_cast<unsigned long long>(s.protect_calls));
+		s = {};
+	}
 	f.start  = now;
 	f.writes = f.reads = f.buffer = f.texture = f.both = f.neither = f.handler_ns = f.distinct = 0;
 	std::fill(std::begin(f.streak), std::end(f.streak), 0);
@@ -145,7 +176,11 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 		const bool write = access == PageFaultAccess::Write;
 		const bool in_buffer  = write && m_buffer_cache.IsRegionRegistered(fault_vaddr & ~(TRACKER_PAGE_SIZE - 1), TRACKER_PAGE_SIZE);
 		const bool in_texture = write && m_texture_cache.IsRegionRegistered(fault_vaddr & ~(TRACKER_PAGE_SIZE - 1), TRACKER_PAGE_SIZE);
+		const auto before = Hybrid::g_fault_stage_time;
 		const bool handled = HandleFaultUncounted(access, fault_vaddr);
+		if (handled) {
+			RecordStages(before, Hybrid::g_fault_stage_time);
+		}
 		if (handled) {
 			RecordFault(write, fault_vaddr, m_gpu != nullptr ? m_gpu->GetFrameNum() : 0, in_buffer, in_texture,
 			            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -172,7 +207,18 @@ bool RenderContext::HandleFaultUncounted(PageFaultAccess access, uint64_t fault_
 		// A write of the command stream: device-address readers after it must see it.
 		m_bda_generation++;
 	}
-	if (access == PageFaultAccess::Write) {
+	if (access == PageFaultAccess::Write && FaultStatsOn()) {
+		auto&      stage = Hybrid::g_fault_stage_time;
+		const auto t0    = Hybrid::FaultStageClockNs();
+		m_buffer_cache.InvalidateFaultedPage(fault_vaddr);
+		const auto t1 = Hybrid::FaultStageClockNs();
+		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
+		const auto t2 = Hybrid::FaultStageClockNs();
+		m_image_heap.InvalidateMemory(fault_vaddr, fault_size);
+		stage.buffer_ns += t1 - t0;
+		stage.texture_ns += t2 - t1;
+		stage.heap_ns += Hybrid::FaultStageClockNs() - t2;
+	} else if (access == PageFaultAccess::Write) {
 		m_buffer_cache.InvalidateFaultedPage(fault_vaddr);
 		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
 		m_image_heap.InvalidateMemory(fault_vaddr, fault_size);

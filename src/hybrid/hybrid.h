@@ -16,6 +16,15 @@ struct Aps5Host {
 
 namespace Hybrid {
 
+// KYTY_FAULT_STATS: time this thread spent in the fault handler's slow parts (protect_host, buffer
+// readback, the texture cache lock), read before and after each stage of a fault. Dry.
+struct FaultStageTime {
+	uint64_t protect_ns = 0, protect_calls = 0, readback_ns = 0, readbacks = 0, texture_lock_ns = 0;
+	uint64_t buffer_ns = 0, texture_ns = 0, heap_ns = 0;
+};
+inline thread_local FaultStageTime g_fault_stage_time;
+[[nodiscard]] uint64_t FaultStageClockNs() noexcept;
+
 [[nodiscard]] bool            Enabled() noexcept;
 [[nodiscard]] const Aps5Host* Host() noexcept;
 void                          SetHost(const Aps5Host* host) noexcept;

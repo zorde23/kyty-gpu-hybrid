@@ -54,6 +54,10 @@ void PadInjection(void* pad_data, uint64_t bytes) {
 	}
 }
 
+uint64_t FaultStageClockNs() noexcept {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
 void NoteFlip() {
 	if (!Enabled()) {
 		return;

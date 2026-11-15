@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/cache/textureCache.h"
+#include "hybrid/hybrid.h"
 
 #include "common/alignment.h"
 #include "common/assert.h"
@@ -2410,7 +2411,9 @@ void TextureCache::InvalidateMemory(uint64_t address, uint64_t size) {
 		return;
 	}
 	FlushLazyReadback(address, size);
+	const auto       lock_start = Hybrid::FaultStageClockNs();
 	std::scoped_lock lock {m_lock};
+	Hybrid::g_fault_stage_time.texture_lock_ns += Hybrid::FaultStageClockNs() - lock_start;
 	const auto       page_begin = Common::AlignDown(address, TRACKER_PAGE_SIZE);
 	const auto       page_end   = Common::AlignUp(address + size, TRACKER_PAGE_SIZE);
 	for (const auto id: FindImagesInRegion(page_begin, page_end - page_begin)) {
