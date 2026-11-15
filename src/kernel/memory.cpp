@@ -3795,6 +3795,10 @@ void HybridWaitGpuIdle() {
 	}
 }
 
+bool HybridWaitGpuIdleFor(uint32_t millis) {
+	return g_gpu_resources == nullptr || g_gpu_resources->GetGpu().WaitForIdleFor(millis);
+}
+
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size) {
 	std::lock_guard<std::recursive_mutex> memory_operation_lock(g_memory_operation_mutex);
 

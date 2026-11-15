@@ -267,6 +267,7 @@ void HybridPrepareHostWrite(uint64_t vaddr, uint64_t size);
 void HybridMapPrivate(uint64_t vaddr, uint64_t size);
 // The hybrid frame capture: waits until the guest GPU has no queued or running work.
 void HybridWaitGpuIdle();
+bool HybridWaitGpuIdleFor(uint32_t millis);
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)

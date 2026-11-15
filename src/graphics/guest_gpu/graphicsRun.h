@@ -51,6 +51,8 @@ public:
 	void SuspendPoint();
 	// Wait for guest command processing, including all compute queues (not native GPU completion).
 	void              WaitForIdle();
+	// WaitForIdle() bounded by `millis`: false when the GPU still has work (it may wait on memory the caller writes later).
+	bool              WaitForIdleFor(uint32_t millis);
 	[[nodiscard]] int GetFrameNum() const;
 
 	// The thread that owns the renderer: the execution thread of a pipelined GPU.

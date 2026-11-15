@@ -352,6 +352,12 @@ extern "C" __declspec(dllexport) bool kyty_gpu_invalidate(uint64_t address, uint
 	return Guarded("kyty_gpu_invalidate", [&] { return Libs::Graphics::HybridInvalidateMemory(address, bytes); }, false);
 }
 
+// The frame capture's wait for an idle GPU, bounded: the calling game thread may be the one that writes
+// the memory the GPU waits on, so an unbounded wait would freeze the game.
+extern "C" __declspec(dllexport) bool kyty_gpu_wait_idle_for(uint32_t millis) {
+	return Guarded("kyty_gpu_wait_idle_for", [&] { return Libs::LibKernel::Memory::HybridWaitGpuIdleFor(millis); }, false);
+}
+
 extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {
 	Guarded(
 	    "kyty_gpu_prepare_host_write",

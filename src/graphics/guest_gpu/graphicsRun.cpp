@@ -982,6 +982,21 @@ void GuestGpu::WaitForIdle() {
 	}
 }
 
+bool GuestGpu::WaitForIdleFor(uint32_t millis) {
+	EXIT_IF(IsGpuThread() || CommandScheduler::InDeferredOperation());
+	const auto        deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millis);
+	Common::LockGuard lock(m_queue_mutex);
+	while (m_processing || !m_commands.empty() || m_submission_count != 0) {
+		const auto now = std::chrono::steady_clock::now();
+		if (now >= deadline) {
+			return false;
+		}
+		const auto left = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+		m_idle.WaitFor(&m_queue_mutex, static_cast<uint32_t>(std::min<int64_t>(left, 100000)));
+	}
+	return true;
+}
+
 void GuestGpu::ThreadRun(void* data) {
 	auto* gpu = static_cast<GuestGpu*>(data);
 	EXIT_IF(gpu == nullptr);
