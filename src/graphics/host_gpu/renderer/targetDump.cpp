@@ -763,6 +763,10 @@ void Init() {
 	    g_trigger.empty() ? "" : fmt::format(", trigger file {}", g_trigger.string())));
 }
 
+bool Capturing() noexcept {
+	return g_enabled && g_state.load(std::memory_order_acquire) == State::Capturing;
+}
+
 bool Enabled() noexcept {
 	return g_enabled;
 }

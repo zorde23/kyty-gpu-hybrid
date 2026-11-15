@@ -22,6 +22,8 @@ namespace Libs::Graphics::TargetDump {
 
 void Init();
 [[nodiscard]] bool Enabled() noexcept;
+// A frame is being dumped now (the per-draw work outside it can be skipped).
+[[nodiscard]] bool Capturing() noexcept;
 void RequestCapture() noexcept;
 // Starts the dump with the next draw instead of the next flip (the frame capture calls it with the GPU idle).
 void StartCapture() noexcept;

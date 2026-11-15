@@ -356,7 +356,7 @@ static bool HasStorageWrites(const ShaderComputeInputInfo& input_info,
 static void DumpDispatchTargets(RenderContext& context, CommandBuffer& buffer,
                                 const ShaderRecompiler::IR::ShaderInfo& info,
                                 const PreparedBindings& bindings, vk::Pipeline pipeline) {
-	if (!TargetDump::Enabled()) {
+	if (!TargetDump::Capturing()) {
 		return;
 	}
 	std::vector<TargetDump::StorageTarget> targets;

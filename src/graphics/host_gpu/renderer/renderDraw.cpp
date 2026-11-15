@@ -1885,7 +1885,7 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 		m_shader_write_deferred = true;
 	}
 	std::vector<TargetDump::StorageTarget> textures;
-	if (TargetDump::Enabled() && state.ps_active) {
+	if (TargetDump::Capturing() && state.ps_active) {
 		for (const auto& binding: bindings.pixel.images) {
 			if (binding.image_id) {
 				textures.push_back({binding.image_id.index, binding.desc.view_info.base_level,
