@@ -1831,7 +1831,6 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 		buffer.EndRendering();
 		ShaderWriteHazardBarrier(vk_buffer, shader_write_stages);
 	}
-	TargetDump::BeforeDraw(m_context, buffer, state, pipeline.pipeline);
 	buffer.BeginRendering(rendering);
 	if (Common::DebugCounters::StageTimesEnabled()) {
 		static vk::Pipeline last_pipeline;

@@ -769,48 +769,6 @@ void OnStreamFlip() noexcept {
 	}
 }
 
-void BeforeDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
-                vk::Pipeline pipeline) {
-	if (g_each_ps.empty() || !BeginOperation() || !PsMatches(pipeline)) {
-		return;
-	}
-	// The targets as the matched draw finds them, as b files of its operation number.
-	auto&      cache   = context.GetTextureCache();
-	const auto shaders = GpuBreadcrumbs::Describe(pipeline);
-	const auto read    = [&](ImageId id, Kind kind, uint32_t slot, uint32_t mip, uint32_t layer,
-	                         vk::Extent2D extent) {
-		auto&   image = cache.GetImage(id);
-		Pending p;
-		p.op           = g_draw + 1;
-		p.kind         = kind;
-		p.slot         = slot;
-		p.flip         = g_flips.load();
-		p.guest_width  = extent.width;
-		p.guest_height = extent.height;
-		p.mip          = mip;
-		p.layer        = layer;
-		p.address      = image.info.data.address;
-		p.shaders      = shaders;
-		if (ReadBack(context, buffer, image, kind, extent, p)) {
-			Write(p, 'b');
-		}
-	};
-	for (uint32_t i = 0; i < state.color_count; ++i) {
-		const auto& color = state.colors[i];
-		if (color.image_id) {
-			read(color.image_id, Kind::Color, color.target_slot, color.desc.view_info.base_level,
-			     color.desc.view_info.base_layer, color.Extent());
-		}
-	}
-	if (const auto* depth = state.depth; depth != nullptr && depth->image_id) {
-		const auto mip = depth->desc.view_info.base_level;
-		read(depth->image_id, depth->stencil_test_enable ? Kind::Stencil : Kind::Depth, 0, mip,
-		     depth->desc.view_info.base_layer,
-		     {std::max(depth->desc.info.extent.width >> mip, 1u),
-		      std::max(depth->desc.info.extent.height >> mip, 1u)});
-	}
-}
-
 void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
                vk::Pipeline pipeline, std::span<const StorageTarget> textures) {
 	if (!BeginOperation()) {
