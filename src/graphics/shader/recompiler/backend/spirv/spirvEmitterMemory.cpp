@@ -2001,10 +2001,21 @@ void EmitReadConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 		                                                  ConstantU32(state, last_element));
 	}
 	const auto condition = EmitStorageElementInBounds(state, access, element);
-	ctx.Define(inst, EmitValueOrZeroIfCondition(state, condition, [&]() {
-		           return EmitNative<spv::OpLoad, IR::Type::U32>(
-		               state, EmitMemoryElementPointer(state, access, element));
-	           }));
+	if (condition == ConstantBool(state, true)) {
+		ctx.Define(inst, EmitNative<spv::OpLoad, IR::Type::U32>(state, EmitMemoryElementPointer(state, access, element)));
+		return;
+	}
+	// Selects instead of a branch and a phi: on AMD (Windows driver) the branch form returned zero
+	// for in-range scalar loads (a title's skin material constant, so the skin lit as metal).
+	// Element 0 of an empty range is read safely under robustBufferAccess, which the device enables.
+	const auto select = [&](uint32_t value, uint32_t fallback) {
+		const auto result = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpSelect, TypeU32(state), result, condition, value, fallback);
+		return result;
+	};
+	const auto value = EmitNative<spv::OpLoad, IR::Type::U32>(
+	    state, EmitMemoryElementPointer(state, access, select(element, ConstantU32(state, 0))));
+	ctx.Define(inst, select(value, ConstantU32(state, 0)));
 }
 
 uint32_t EmitGetBufferResourceIndex(ValueEmitContext& ctx, const IR::Inst& inst) {
