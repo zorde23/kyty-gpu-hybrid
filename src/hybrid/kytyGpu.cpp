@@ -14,10 +14,12 @@
 #include "kernel/memory.h"
 #include "libs/libs.h"
 #include "loader/symbolDatabase.h"
+#include "loader/systemContent.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <exception>
 #include <future>
 #include <thread>
@@ -64,6 +66,31 @@ auto Guarded(const char* export_name, Body&& body, decltype(body()) fallback) no
 		Failed(export_name, "unknown exception");
 	}
 	return fallback;
+}
+
+// The pipeline cache is keyed by the title's TITLE_ID, which pure Kyty reads from param.json when it loads the
+// game; in the hybrid the executable loads it, so read it here (the run's directory has app0 next to the exe).
+void LoadTitleForPipelineCache() noexcept {
+	try {
+		const std::filesystem::path param_json = std::filesystem::path("app0") / "sce_sys" / "param.json";
+		if (!std::filesystem::exists(param_json)) {
+			std::fprintf(stderr, "[kyty-gpu] no %s: the Vulkan pipeline cache stays off\n", param_json.string().c_str());
+			return;
+		}
+		Loader::SystemContentLoadParamSfo(param_json);
+		std::string title_id;
+		if (!Loader::SystemContentParamSfoGetString("TITLE_ID", &title_id) || title_id.empty()) {
+			std::fprintf(stderr, "[kyty-gpu] %s has no TITLE_ID: the Vulkan pipeline cache stays off\n", param_json.string().c_str());
+			return;
+		}
+		const auto cache = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
+		std::error_code error;
+		const auto bytes = std::filesystem::file_size(cache, error);
+		std::fprintf(stderr, "[kyty-gpu] Vulkan pipeline cache %s: %s\n", std::filesystem::absolute(cache).string().c_str(),
+		             error ? "absent, created at exit" : (std::to_string(bytes) + " bytes").c_str());
+	} catch (const std::exception& error) {
+		std::fprintf(stderr, "[kyty-gpu] param.json not loaded (%s): the Vulkan pipeline cache stays off\n", error.what());
+	}
 }
 
 } // namespace
@@ -137,6 +164,7 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 			    KYTY_PROFILER_THREAD("Thread_KytyMain");
 			    subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
 			    subsystems.Initialize<Libs::Controller::Lifecycle>();
+			    LoadTitleForPipelineCache();
 			    subsystems.Initialize<Libs::Graphics::Lifecycle>();
 			    started.set_value();
 			    Libs::Graphics::WindowRun();
