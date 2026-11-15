@@ -123,8 +123,7 @@ void RecordFault(bool write, uint64_t vaddr, int frame, bool in_buffer, bool in_
 	std::fprintf(stderr,
 	             "[kyty-faults] %.1f s: write %llu read %llu; write owner buffer %llu texture %llu both %llu "
 	             "other %llu; write by frames in a row 1:%llu 2-3:%llu 4-9:%llu >=10:%llu (>=4: %.1f%%); "
-	             "new pages %llu; handler %.2f us/fault
-",
+	             "new pages %llu; handler %.2f us/fault\n",
 	             seconds, static_cast<unsigned long long>(f.writes), static_cast<unsigned long long>(f.reads),
 	             static_cast<unsigned long long>(f.buffer), static_cast<unsigned long long>(f.texture),
 	             static_cast<unsigned long long>(f.both), static_cast<unsigned long long>(f.neither),
