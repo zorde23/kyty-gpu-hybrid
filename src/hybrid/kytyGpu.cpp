@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <future>
 #include <thread>
@@ -109,6 +110,22 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 			    // The game asks the executable for its user (libSceUserService stays in the executable): Kyty's
 			    // pad maps players by that id.
 			    options.user_id = 0x10000000;
+			    // The same knobs as pure Kyty's --vblank-frequency and --present-mode, for measuring without vsync.
+			    if (const char* hz = std::getenv("KYTY_HYB_VBLANK_HZ"); hz != nullptr && std::atoi(hz) > 0) {
+				    options.vblank_frequency = static_cast<uint32_t>(std::atoi(hz));
+			    }
+			    if (const char* mode = std::getenv("KYTY_HYB_PRESENT_MODE"); mode != nullptr) {
+				    const std::string value(mode);
+				    if (value == "Fifo") {
+					    options.present_mode = Config::PresentMode::Fifo;
+				    } else if (value == "Mailbox") {
+					    options.present_mode = Config::PresentMode::Mailbox;
+				    } else if (value == "Immediate") {
+					    options.present_mode = Config::PresentMode::Immediate;
+				    }
+			    }
+			    std::fprintf(stderr, "[kyty-gpu] vblank %u Hz, present mode %d (KYTY_HYB_VBLANK_HZ, KYTY_HYB_PRESENT_MODE)\n",
+			                 options.vblank_frequency, static_cast<int>(options.present_mode));
 			    Config::Load(options);
 			    subsystems.Initialize<Log::Lifecycle>();
 			    subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
