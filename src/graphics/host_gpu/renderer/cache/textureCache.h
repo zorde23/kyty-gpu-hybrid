@@ -102,6 +102,10 @@ public:
 	// longer. May wait for the GPU, so the caller holds none of the cache's locks.
 	void               FlushLazyReadback(uint64_t address, uint64_t size);
 	void               InvalidateMemoryFromGPU(uint64_t address, uint64_t size);
+	// The frame capture, before its snapshot: writes every image the GPU wrote to guest memory,
+	// so the replay finds what earlier frames rendered. An image Kyty cannot write back (layout,
+	// samples, compression) is logged and left out, never written wrong.
+	void               FlushGpuImagesToGuest();
 	[[nodiscard]] bool IsRegionRegistered(uint64_t address, uint64_t size);
 	[[nodiscard]] bool IsRegionGpuModified(uint64_t address, uint64_t size);
 

@@ -2373,6 +2373,45 @@ bool TextureCache::DownloadImageMemory(ImageId id) {
 	return true;
 }
 
+void TextureCache::FlushGpuImagesToGuest() {
+	m_scheduler.Context().GetGpu().SendUrgentCommandSync([this] {
+		const auto started = std::chrono::steady_clock::now();
+		uint32_t   written = 0;
+		uint32_t   skipped = 0;
+		uint64_t   bytes   = 0;
+		{
+			std::scoped_lock lock {m_lock};
+			m_slot_images.ForEach([&](ImageId id, Image& image) {
+				if (!image.IsGpuModified()) {
+					return;
+				}
+				const auto& info = image.info;
+				if (DownloadImageMemory(id)) {
+					written++;
+					bytes += info.data.size;
+					return;
+				}
+				skipped++;
+				const char* reason = image.depth_id         ? "aliases a depth image"
+				                     : !image.SafeToDownload() ? "the CPU wrote it after the GPU"
+				                     : !CanDownload(image)     ? "Kyty cannot write this layout back"
+				                                               : "its guest memory is not readable";
+				std::fprintf(stderr, "[kyty-gpu] capture: image 0x%llx %ux%u format %u tile %u samples %u not written back (%s)\n",
+				             static_cast<unsigned long long>(info.data.address), info.extent.width, info.extent.height,
+				             static_cast<unsigned>(info.guest_format), static_cast<unsigned>(info.tile_mode), static_cast<unsigned>(info.samples), reason);
+			});
+		}
+		if (written != 0) {
+			const auto tick = m_scheduler.CurrentTick();
+			m_scheduler.Wait(tick);
+			m_scheduler.WaitPriorityOperations(tick);
+		}
+		std::fprintf(stderr, "[kyty-gpu] capture: %u GPU images written back to guest memory (%llu MiB), %u left out, %lld ms\n", written,
+		             static_cast<unsigned long long>(bytes >> 20u), skipped,
+		             static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()));
+	});
+}
+
 void TextureCache::InvalidateMemoryFromGPU(uint64_t address, uint64_t size) {
 	std::scoped_lock lock {m_lock};
 	for (const auto id: FindImagesInRegion(address, size)) {

@@ -399,6 +399,17 @@ extern "C" __declspec(dllexport) bool kyty_gpu_self_test_rewind() {
 	return Guarded("kyty_gpu_self_test_rewind", [] { return Libs::Graphics::HybridSelfTestRewind(); }, false);
 }
 
+// The frame capture, with the GPU quiet and before its snapshot: GPU-written images to guest memory.
+extern "C" __declspec(dllexport) bool kyty_gpu_flush_images() {
+	return Guarded(
+	    "kyty_gpu_flush_images",
+	    [] {
+		    Libs::Graphics::HybridFlushGpuImages();
+		    return true;
+	    },
+	    false);
+}
+
 // The same, for the graphics queue only (compute queues may keep running); on timeout it logs the busy queues.
 extern "C" __declspec(dllexport) bool kyty_gpu_wait_gfx_idle_for(uint32_t millis) {
 	return Guarded(

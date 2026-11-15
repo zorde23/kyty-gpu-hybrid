@@ -4301,6 +4301,12 @@ bool HybridSelfTestRewind() {
 	return g_renderer != nullptr && g_renderer->GetGpu().SelfTestRewind();
 }
 
+void HybridFlushGpuImages() {
+	if (g_renderer != nullptr) {
+		g_renderer->GetTextureCache().FlushGpuImagesToGuest();
+	}
+}
+
 namespace Gen5Driver {
 
 static void submit_dcb(uint32_t* dcb, uint32_t size_in_dwords) {

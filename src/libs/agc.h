@@ -22,6 +22,7 @@ bool HybridRestoreRegisters(const uint64_t* words, const uint64_t* end);
 void HybridCaptureBlocked(std::vector<uint64_t>& words);
 bool HybridRestoreBlocked(const uint64_t* words, const uint64_t* end);
 bool HybridSelfTestRewind();
+void HybridFlushGpuImages();
 
 struct SizeAlign {
 	uint64_t m_size;
