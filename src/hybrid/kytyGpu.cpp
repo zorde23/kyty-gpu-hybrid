@@ -10,6 +10,7 @@
 #include "libs/agc.h"
 #include "libs/controller.h"
 #include "graphics/presentation/window.h"
+#include "graphics/host_gpu/renderer/targetDump.h"
 #include "hybrid/hybrid.h"
 #include "kernel/memory.h"
 #include "libs/libs.h"
@@ -251,6 +252,12 @@ extern "C" __declspec(dllexport) void kyty_gpu_wait_idle() {
 		    return true;
 	    },
 	    false);
+}
+
+// The executable's frame capture starts the render target dump (KYTY_TARGET_DUMP=1) at the next flip, so the
+// game and its replay dump the same captured frame.
+extern "C" __declspec(dllexport) void kyty_gpu_request_target_dump() {
+	Libs::Graphics::TargetDump::RequestCapture();
 }
 
 extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {
