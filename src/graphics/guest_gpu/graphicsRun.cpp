@@ -5,6 +5,8 @@
 #include "common/hackNotice.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+
+#include <fmt/format.h>
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "graphics/guest_gpu/command_processor/commandProcessor.h"
@@ -980,6 +982,58 @@ void GuestGpu::WaitForIdle() {
 	while (m_processing || !m_commands.empty() || m_submission_count != 0) {
 		m_idle.Wait(&m_queue_mutex);
 	}
+}
+
+std::string GuestGpu::DescribeBusy() {
+	std::string       text;
+	Common::LockGuard lock(m_queue_mutex);
+	text += fmt::format("processing {}, commands {}, submissions {}, waiting queues {}, current queue {}\n", m_processing,
+	                    m_commands.size(), m_submission_count, m_waiting_queues, m_current_queue);
+	for (uint32_t queue = 0; queue < QueueCount; queue++) {
+		const auto& range = m_wait_ranges[queue];
+		if (m_queues[queue].empty() && range.begin == range.end) {
+			continue;
+		}
+		text += fmt::format("  queue {} ({}): {} queued", queue, queue == 0 ? "gfx" : "compute", m_queues[queue].size());
+		if (!m_queues[queue].empty()) {
+			const auto& front = m_queues[queue].front();
+			text += fmt::format(", front blocked {} yielded {} type {} {} dwords", front.blocked, front.yielded,
+			                    static_cast<int>(front.type), front.commands.size());
+		}
+		if (range.begin != range.end) {
+			uint64_t value = 0;
+			std::memcpy(&value, reinterpret_cast<const void*>(range.begin), std::min<uint64_t>(sizeof(value), range.end - range.begin));
+			text += fmt::format(", waits on [{:#x}, {:#x}) holding {:#018x}", range.begin, range.end, value);
+		}
+		text += "\n";
+	}
+	return text;
+}
+
+bool GuestGpu::WaitForGfxIdleFor(uint32_t millis) {
+	EXIT_IF(IsGpuThread() || CommandScheduler::InDeferredOperation());
+	const auto        deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millis);
+	Common::LockGuard lock(m_queue_mutex);
+	while (!m_queues[0].empty() || (m_processing && m_current_queue == 0) || !m_commands.empty()) {
+		const auto now = std::chrono::steady_clock::now();
+		if (now >= deadline) {
+			return false;
+		}
+		const auto left = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+		m_idle.WaitFor(&m_queue_mutex, static_cast<uint32_t>(std::min<int64_t>(left, 10000)));
+	}
+	return true;
+}
+
+std::vector<uint32_t> GuestGpu::BusyQueues() {
+	std::vector<uint32_t> busy;
+	Common::LockGuard     lock(m_queue_mutex);
+	for (uint32_t queue = 0; queue < QueueCount; queue++) {
+		if (!m_queues[queue].empty()) {
+			busy.push_back(queue);
+		}
+	}
+	return busy;
 }
 
 bool GuestGpu::WaitForIdleFor(uint32_t millis) {

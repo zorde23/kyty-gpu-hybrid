@@ -6,6 +6,8 @@
 #include "common/spscQueue.h"
 #include "common/threads.h"
 #include "common/uniqueFunction.h"
+
+#include <string>
 #include "graphics/guest_gpu/command_processor/commandProcessor.h"
 
 #include <array>
@@ -53,6 +55,14 @@ public:
 	void              WaitForIdle();
 	// WaitForIdle() bounded by `millis`: false when the GPU still has work (it may wait on memory the caller writes later).
 	bool              WaitForIdleFor(uint32_t millis);
+	// What keeps the GPU busy, one line per queue with work: queued submissions, whether the front one is
+	// blocked, and the guest memory it waits on with its current first 8 bytes (diagnostics, racy).
+	std::string       DescribeBusy();
+	// WaitForIdleFor() for the graphics queue only: no gfx submission queued or being processed and no
+	// pending command; compute queues may keep running.
+	bool              WaitForGfxIdleFor(uint32_t millis);
+	// The queues with queued submissions (0 = gfx, then compute).
+	std::vector<uint32_t> BusyQueues();
 	[[nodiscard]] int GetFrameNum() const;
 
 	// The thread that owns the renderer: the execution thread of a pipelined GPU.

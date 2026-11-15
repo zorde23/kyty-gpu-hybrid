@@ -6,6 +6,7 @@
 #include "common/virtualMemory.h"
 
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -268,6 +269,9 @@ void HybridMapPrivate(uint64_t vaddr, uint64_t size);
 // The hybrid frame capture: waits until the guest GPU has no queued or running work.
 void HybridWaitGpuIdle();
 bool HybridWaitGpuIdleFor(uint32_t millis);
+std::string HybridDescribeGpuBusy();
+bool HybridWaitGpuGfxIdleFor(uint32_t millis);
+std::vector<uint32_t> HybridGpuBusyQueues();
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)

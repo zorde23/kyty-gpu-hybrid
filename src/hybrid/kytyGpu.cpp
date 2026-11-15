@@ -355,7 +355,46 @@ extern "C" __declspec(dllexport) bool kyty_gpu_invalidate(uint64_t address, uint
 // The frame capture's wait for an idle GPU, bounded: the calling game thread may be the one that writes
 // the memory the GPU waits on, so an unbounded wait would freeze the game.
 extern "C" __declspec(dllexport) bool kyty_gpu_wait_idle_for(uint32_t millis) {
-	return Guarded("kyty_gpu_wait_idle_for", [&] { return Libs::LibKernel::Memory::HybridWaitGpuIdleFor(millis); }, false);
+	return Guarded(
+	    "kyty_gpu_wait_idle_for",
+	    [&] {
+		    if (Libs::LibKernel::Memory::HybridWaitGpuIdleFor(millis)) {
+			    return true;
+		    }
+		    std::fprintf(stderr, "[kyty-gpu] the GPU is still busy after %u ms:\n%s", millis,
+		                 Libs::LibKernel::Memory::HybridDescribeGpuBusy().c_str());
+		    return false;
+	    },
+	    false);
+}
+
+// The same, for the graphics queue only (compute queues may keep running); on timeout it logs the busy queues.
+extern "C" __declspec(dllexport) bool kyty_gpu_wait_gfx_idle_for(uint32_t millis) {
+	return Guarded(
+	    "kyty_gpu_wait_gfx_idle_for",
+	    [&] {
+		    if (Libs::LibKernel::Memory::HybridWaitGpuGfxIdleFor(millis)) {
+			    return true;
+		    }
+		    std::fprintf(stderr, "[kyty-gpu] the graphics queue is still busy after %u ms:\n%s", millis,
+		                 Libs::LibKernel::Memory::HybridDescribeGpuBusy().c_str());
+		    return false;
+	    },
+	    false);
+}
+
+// The queues with queued submissions into `out` (0 = gfx); returns how many there are.
+extern "C" __declspec(dllexport) uint32_t kyty_gpu_busy_queues(uint32_t* out, uint32_t capacity) {
+	return Guarded(
+	    "kyty_gpu_busy_queues",
+	    [&]() -> uint32_t {
+		    const auto busy = Libs::LibKernel::Memory::HybridGpuBusyQueues();
+		    for (uint32_t i = 0; out != nullptr && i < capacity && i < busy.size(); i++) {
+			    out[i] = busy[i];
+		    }
+		    return static_cast<uint32_t>(busy.size());
+	    },
+	    0u);
 }
 
 extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {

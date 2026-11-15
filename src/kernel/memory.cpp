@@ -3799,6 +3799,18 @@ bool HybridWaitGpuIdleFor(uint32_t millis) {
 	return g_gpu_resources == nullptr || g_gpu_resources->GetGpu().WaitForIdleFor(millis);
 }
 
+bool HybridWaitGpuGfxIdleFor(uint32_t millis) {
+	return g_gpu_resources == nullptr || g_gpu_resources->GetGpu().WaitForGfxIdleFor(millis);
+}
+
+std::vector<uint32_t> HybridGpuBusyQueues() {
+	return g_gpu_resources == nullptr ? std::vector<uint32_t> {} : g_gpu_resources->GetGpu().BusyQueues();
+}
+
+std::string HybridDescribeGpuBusy() {
+	return g_gpu_resources == nullptr ? std::string("no GPU\n") : g_gpu_resources->GetGpu().DescribeBusy();
+}
+
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size) {
 	std::lock_guard<std::recursive_mutex> memory_operation_lock(g_memory_operation_mutex);
 
