@@ -265,6 +265,13 @@ static void ShaderApplyAttribSemantics(ShaderVertexInputInfo& info,
 		r.fields[1]       = sharp[1];
 		r.fields[2]       = sharp[2];
 		r.fields[3]       = sharp[3];
+		if (r.AddTid()) {
+			std::fprintf(stderr,
+			             "[kyty-gpu] vertex buffer descriptor with add_tid: semantic %u, attribute table %p, descriptor at %p = "
+			             "%08x %08x %08x %08x\n",
+			             in.semantic, static_cast<const void*>(attrib), static_cast<const void*>(&buffer[index * 4]), sharp[0], sharp[1],
+			             sharp[2], sharp[3]);
+		}
 		EXIT_NOT_IMPLEMENTED(r.AddTid());
 		EXIT_NOT_IMPLEMENTED(r.SwizzleEnabled());
 		if (format != Prospero::VertexAttribFormat::kInvalid) {
