@@ -254,10 +254,10 @@ extern "C" __declspec(dllexport) void kyty_gpu_wait_idle() {
 	    false);
 }
 
-// The executable's frame capture starts the render target dump (KYTY_TARGET_DUMP=1) at the next flip, so the
-// game and its replay dump the same captured frame.
+// The executable's frame capture starts the render target dump (KYTY_TARGET_DUMP=1) with the next draw, with the
+// GPU idle, so the game and its replay dump the first captured frame.
 extern "C" __declspec(dllexport) void kyty_gpu_request_target_dump() {
-	Libs::Graphics::TargetDump::RequestCapture();
+	Libs::Graphics::TargetDump::StartCapture();
 }
 
 extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {

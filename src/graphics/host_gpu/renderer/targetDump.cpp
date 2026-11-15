@@ -276,6 +276,13 @@ void RequestCapture() noexcept {
 	}
 }
 
+void StartCapture() noexcept {
+	auto expected = State::Idle;
+	if (g_enabled && g_state.compare_exchange_strong(expected, State::Capturing)) {
+		Log::WriteToConsoleAndLog("Target dump: started at the next draw\n");
+	}
+}
+
 void OnFlip() noexcept {
 	if (!g_enabled) {
 		return;

@@ -18,6 +18,8 @@ namespace Libs::Graphics::TargetDump {
 void Init();
 [[nodiscard]] bool Enabled() noexcept;
 void RequestCapture() noexcept;
+// Starts the dump with the next draw instead of the next flip (the frame capture calls it with the GPU idle).
+void StartCapture() noexcept;
 // Called at each guest flip (presentation thread).
 void OnFlip() noexcept;
 // Called by the execution thread after a draw is recorded.
