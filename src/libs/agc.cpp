@@ -278,7 +278,15 @@ struct CommandBuffer {
 				return false;
 			}
 
-			bool result = callback(this, num_dw + reserved_dw, user_data);
+			// In the hybrid the executable runs the guest's callback, so a frame capture can record its result.
+			static const auto call_guest =
+			    Hybrid::Executable<uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t)>("KytyGpuCallGuest_nid_no_patch");
+			const bool result =
+			    call_guest != nullptr
+			        ? (call_guest(reinterpret_cast<uint64_t>(callback), reinterpret_cast<uint64_t>(this),
+			                      num_dw + reserved_dw, reinterpret_cast<uint64_t>(user_data)) &
+			           0xffu) != 0
+			        : callback(this, num_dw + reserved_dw, user_data);
 			if (!result) {
 				LOGF_COLOR(Log::Color::Red,
 				           "\t command buffer grow callback failed: requested = %" PRIu32
