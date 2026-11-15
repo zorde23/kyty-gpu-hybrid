@@ -1166,6 +1166,8 @@ uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size) {
 	uint64_t clamped_size = 0;
 	if (Hybrid::Enabled()) {
 		// Memory inside one donated mapping is mapped by definition: Kyty's own registry answers, no system call.
+		// shortcut: a range across mappings, partly outside or not donated still asks VirtualQuery; replace it with
+		// the ranges the executable reports (debt A4) when those show up in [hib-cp] as a cost.
 		static const bool shortcut = [] {
 			const char* value = std::getenv("KYTY_HYB_CLAMP_DONATED");
 			return value != nullptr && std::strcmp(value, "1") == 0;
