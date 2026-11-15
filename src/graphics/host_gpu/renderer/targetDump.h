@@ -40,6 +40,10 @@ struct StorageTarget {
 	uint32_t mip  = 0;
 	uint32_t layer = 0;
 };
+// Called before a draw is recorded: with KYTY_TARGET_DUMP_PS, writes the targets a matching draw
+// finds (b files).
+void BeforeDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
+                vk::Pipeline pipeline);
 // textures: the pixel shader's sampled images, written as t files for the draws dumped one by one.
 void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
                vk::Pipeline pipeline, std::span<const StorageTarget> textures = {});

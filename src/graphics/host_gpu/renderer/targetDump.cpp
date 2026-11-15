@@ -24,6 +24,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -38,6 +39,9 @@ uint32_t              g_at_flip  = 0;
 uint32_t              g_max      = 50000; // a safety stop; the frame ends at the next stream flip
 uint32_t              g_each_from = 1;   // draws dumped one by one (KYTY_TARGET_DUMP_DRAWS=a-b)
 uint32_t              g_each_to   = 0;
+std::vector<std::string> g_each_ps;    // pixel shader hash prefixes dumped one by one (KYTY_TARGET_DUMP_PS)
+bool                  g_each_now = false; // the current operation is dumped one by one
+bool                  g_follow   = false; // the previous operation matched g_each_ps
 std::atomic<State>    g_state {State::Idle};
 std::atomic<uint32_t> g_flips {0};
 std::atomic<uint32_t> g_waited {0};
@@ -580,6 +584,25 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 	return true;
 }
 
+// Whether the pipeline's pixel shader hash starts with one of KYTY_TARGET_DUMP_PS.
+bool PsMatches(vk::Pipeline pipeline) {
+	if (g_each_ps.empty()) {
+		return false;
+	}
+	const auto shaders = GpuBreadcrumbs::Describe(pipeline);
+	const auto ps      = std::string_view(shaders).substr(shaders.rfind(' ') + 1);
+	return std::ranges::any_of(g_each_ps, [&](const std::string& prefix) { return ps.starts_with(prefix); });
+}
+
+// Decides g_each_now for the next operation: in the KYTY_TARGET_DUMP_DRAWS range, a
+// KYTY_TARGET_DUMP_PS match, or the operation right after a match.
+void DecideEach(vk::Pipeline pipeline) {
+	const uint32_t op    = g_draw + 1;
+	const bool     match = PsMatches(pipeline);
+	g_each_now           = (op >= g_each_from && op <= g_each_to) || match || g_follow;
+	g_follow             = match;
+}
+
 // Reads back the targets of one operation and moves them to the pass bookkeeping.
 struct Target {
 	ImageId      id;
@@ -621,7 +644,7 @@ void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const 
 			WriteRow(p, "");
 			continue;
 		}
-		if (op >= g_each_from && op <= g_each_to) {
+		if (g_each_now) {
 			Write(p, 'd');
 		}
 		if (target.kind == Kind::Texture) {
@@ -659,6 +682,16 @@ void Init() {
 	}
 	if (const char* max = std::getenv("KYTY_TARGET_DUMP_MAX")) {
 		g_max = static_cast<uint32_t>(std::strtoul(max, nullptr, 10));
+	}
+	if (const char* list = std::getenv("KYTY_TARGET_DUMP_PS")) {
+		std::string_view rest = list;
+		while (!rest.empty()) {
+			const auto comma = rest.find(',');
+			if (const auto item = rest.substr(0, comma); !item.empty()) {
+				g_each_ps.emplace_back(item);
+			}
+			rest = comma == std::string_view::npos ? std::string_view {} : rest.substr(comma + 1);
+		}
 	}
 	if (const char* draws = std::getenv("KYTY_TARGET_DUMP_DRAWS")) {
 		char* end   = nullptr;
@@ -736,13 +769,56 @@ void OnStreamFlip() noexcept {
 	}
 }
 
+void BeforeDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
+                vk::Pipeline pipeline) {
+	if (g_each_ps.empty() || !BeginOperation() || !PsMatches(pipeline)) {
+		return;
+	}
+	// The targets as the matched draw finds them, as b files of its operation number.
+	auto&      cache   = context.GetTextureCache();
+	const auto shaders = GpuBreadcrumbs::Describe(pipeline);
+	const auto read    = [&](ImageId id, Kind kind, uint32_t slot, uint32_t mip, uint32_t layer,
+	                         vk::Extent2D extent) {
+		auto&   image = cache.GetImage(id);
+		Pending p;
+		p.op           = g_draw + 1;
+		p.kind         = kind;
+		p.slot         = slot;
+		p.flip         = g_flips.load();
+		p.guest_width  = extent.width;
+		p.guest_height = extent.height;
+		p.mip          = mip;
+		p.layer        = layer;
+		p.address      = image.info.data.address;
+		p.shaders      = shaders;
+		if (ReadBack(context, buffer, image, kind, extent, p)) {
+			Write(p, 'b');
+		}
+	};
+	for (uint32_t i = 0; i < state.color_count; ++i) {
+		const auto& color = state.colors[i];
+		if (color.image_id) {
+			read(color.image_id, Kind::Color, color.target_slot, color.desc.view_info.base_level,
+			     color.desc.view_info.base_layer, color.Extent());
+		}
+	}
+	if (const auto* depth = state.depth; depth != nullptr && depth->image_id) {
+		const auto mip = depth->desc.view_info.base_level;
+		read(depth->image_id, depth->stencil_test_enable ? Kind::Stencil : Kind::Depth, 0, mip,
+		     depth->desc.view_info.base_layer,
+		     {std::max(depth->desc.info.extent.width >> mip, 1u),
+		      std::max(depth->desc.info.extent.height >> mip, 1u)});
+	}
+}
+
 void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
                vk::Pipeline pipeline, std::span<const StorageTarget> textures) {
 	if (!BeginOperation()) {
 		return;
 	}
+	DecideEach(pipeline);
 	std::vector<Target> list;
-	if (g_draw + 1 >= g_each_from && g_draw + 1 <= g_each_to) {
+	if (g_each_now) {
 		auto& cache = context.GetTextureCache();
 		for (uint32_t i = 0; i < textures.size(); ++i) {
 			const ImageId id {textures[i].id};
@@ -781,8 +857,7 @@ void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderSt
 			list.push_back({depth->image_id, Kind::Depth, 0, mip, depth->desc.view_info.base_layer, extent, note});
 		}
 		// The stencil the draw tests or writes, for the draws dumped one by one.
-		const auto op = g_draw + 1;
-		const bool in_range = op >= g_each_from && op <= g_each_to;
+		const bool in_range = g_each_now;
 		if (depth->stencil_test_enable && in_range) {
 			list.push_back({depth->image_id, Kind::Stencil, 0, mip, depth->desc.view_info.base_layer, extent, note});
 		}
@@ -802,6 +877,7 @@ void AfterDispatch(RenderContext& context, CommandBuffer& buffer, std::span<cons
 	if (!BeginOperation()) {
 		return;
 	}
+	DecideEach(pipeline);
 	auto&               cache = context.GetTextureCache();
 	std::vector<Target> list;
 	for (uint32_t i = 0; i < targets.size(); ++i) {
