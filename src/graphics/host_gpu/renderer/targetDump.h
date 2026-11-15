@@ -34,14 +34,15 @@ void OnFlip() noexcept;
 // Called by the execution thread at each flip in the command stream: the frame boundary.
 void OnStreamFlip() noexcept;
 // Called by the execution thread after a draw is recorded.
-void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
-               vk::Pipeline pipeline);
-// An image a dispatch writes, at the view it binds.
+// An image a dispatch writes (or a draw samples), at the view it binds.
 struct StorageTarget {
 	uint32_t id   = 0; // ImageId index
 	uint32_t mip  = 0;
 	uint32_t layer = 0;
 };
+// textures: the pixel shader's sampled images, written as t files for the draws dumped one by one.
+void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
+               vk::Pipeline pipeline, std::span<const StorageTarget> textures = {});
 // Called by the execution thread after a dispatch is recorded.
 void AfterDispatch(RenderContext& context, CommandBuffer& buffer,
                    std::span<const StorageTarget> targets, vk::Pipeline pipeline);

@@ -359,7 +359,7 @@ float DepthValue(vk::Format format, const uint8_t* p) {
 	}
 }
 
-enum class Kind : char { Color = 'c', Depth = 'z', Storage = 's', Stencil = 'k' };
+enum class Kind : char { Color = 'c', Depth = 'z', Storage = 's', Stencil = 'k', Texture = 't' };
 
 struct Pending {
 	uint32_t             op   = 0;
@@ -613,12 +613,19 @@ void DumpTargets(RenderContext& context, CommandBuffer& buffer, std::span<const 
 		p.address      = image.info.data.address;
 		p.shaders      = shaders;
 		p.note         = target.note;
-		if (target.note_only || !ReadBack(context, buffer, image, target.kind, target.extent, p)) {
+		// A sampled depth texture reads back like a depth target.
+		const auto read_kind = target.kind == Kind::Texture && DepthBytes(image.backing.format) != 0
+		                           ? Kind::Depth
+		                           : target.kind;
+		if (target.note_only || !ReadBack(context, buffer, image, read_kind, target.extent, p)) {
 			WriteRow(p, "");
 			continue;
 		}
 		if (op >= g_each_from && op <= g_each_to) {
 			Write(p, 'd');
+		}
+		if (target.kind == Kind::Texture) {
+			continue; // an input, not a target: no pass bookkeeping
 		}
 		keys.emplace_back(p.address, p.mip, p.layer, static_cast<char>(p.kind));
 		current.push_back(std::move(p));
@@ -730,11 +737,22 @@ void OnStreamFlip() noexcept {
 }
 
 void AfterDraw(RenderContext& context, CommandBuffer& buffer, const DrawRenderState& state,
-               vk::Pipeline pipeline) {
+               vk::Pipeline pipeline, std::span<const StorageTarget> textures) {
 	if (!BeginOperation()) {
 		return;
 	}
 	std::vector<Target> list;
+	if (g_draw + 1 >= g_each_from && g_draw + 1 <= g_each_to) {
+		auto& cache = context.GetTextureCache();
+		for (uint32_t i = 0; i < textures.size(); ++i) {
+			const ImageId id {textures[i].id};
+			const auto&   image = cache.GetImage(id);
+			const auto    mip   = textures[i].mip;
+			list.push_back({id, Kind::Texture, i, mip, textures[i].layer,
+			                {std::max(image.backing.extent.width >> mip, 1u),
+			                 std::max(image.backing.extent.height >> mip, 1u)}});
+		}
+	}
 	for (uint32_t i = 0; i < state.color_count; ++i) {
 		const auto& color = state.colors[i];
 		if (color.image_id) {

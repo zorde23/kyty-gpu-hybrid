@@ -1884,7 +1884,16 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 		m_shader_write_queue    = m_guest_queue;
 		m_shader_write_deferred = true;
 	}
-	TargetDump::AfterDraw(m_context, buffer, state, pipeline.pipeline);
+	std::vector<TargetDump::StorageTarget> textures;
+	if (TargetDump::Enabled() && state.ps_active) {
+		for (const auto& binding: bindings.pixel.images) {
+			if (binding.image_id) {
+				textures.push_back({binding.image_id.index, binding.desc.view_info.base_level,
+				                    binding.desc.view_info.base_layer});
+			}
+		}
+	}
+	TargetDump::AfterDraw(m_context, buffer, state, pipeline.pipeline, textures);
 }
 
 // Vulkan offsets for a prepared draw, or nullopt when its indirect records need the CPU:
