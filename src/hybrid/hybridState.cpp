@@ -269,10 +269,19 @@ uint64_t FaultStageClockNs() noexcept {
 	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
+namespace {
+std::atomic<uint64_t> g_flip_count {0};
+} // namespace
+
+uint64_t FlipCount() noexcept {
+	return g_flip_count.load(std::memory_order_acquire);
+}
+
 void NoteFlip() {
 	if (!Enabled()) {
 		return;
 	}
+	g_flip_count.fetch_add(1, std::memory_order_acq_rel);
 	using Clock = std::chrono::steady_clock;
 	static std::mutex              mutex;
 	static Clock::time_point       last {};

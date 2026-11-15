@@ -265,6 +265,8 @@ void HybridOnSectionClosed(void* section);
 void HybridPrepareHostWrite(uint64_t vaddr, uint64_t size);
 // Memory the executable mapped privately for Kyty itself: made visible to the GPU.
 void HybridMapPrivate(uint64_t vaddr, uint64_t size);
+// The hybrid frame capture: waits until the guest GPU has no queued or running work.
+void HybridWaitGpuIdle();
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)

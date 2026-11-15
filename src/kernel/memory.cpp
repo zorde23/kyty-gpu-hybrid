@@ -3789,6 +3789,12 @@ void HybridPrepareHostWrite(uint64_t, uint64_t) {}
 void HybridMapPrivate(uint64_t, uint64_t) {}
 #endif
 
+void HybridWaitGpuIdle() {
+	if (g_gpu_resources != nullptr) {
+		g_gpu_resources->GetGpu().WaitForIdle();
+	}
+}
+
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size) {
 	std::lock_guard<std::recursive_mutex> memory_operation_lock(g_memory_operation_mutex);
 

@@ -198,6 +198,21 @@ extern "C" __declspec(dllexport) bool kyty_gpu_handle_fault(uint64_t address, ui
 	    "kyty_gpu_handle_fault", [&] { return Loader::HybridHandleFault(address, access, rip, context); }, false);
 }
 
+// The executable's frame capture: guest flips presented so far, and a wait until the guest GPU is idle.
+extern "C" __declspec(dllexport) uint64_t kyty_gpu_flip_count() {
+	return Hybrid::FlipCount();
+}
+
+extern "C" __declspec(dllexport) void kyty_gpu_wait_idle() {
+	Guarded(
+	    "kyty_gpu_wait_idle",
+	    []() -> bool {
+		    Libs::LibKernel::Memory::HybridWaitGpuIdle();
+		    return true;
+	    },
+	    false);
+}
+
 extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {
 	Guarded(
 	    "kyty_gpu_prepare_host_write",
