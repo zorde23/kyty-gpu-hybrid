@@ -294,6 +294,7 @@ extern "C" __declspec(dllexport) bool kyty_gpu_restore_state(const uint64_t* wor
 	    "kyty_gpu_restore_state",
 	    [&]() -> bool {
 		    if (words == nullptr || count < 7 || words[0] != CaptureStateMagic || count < 2 + words[1] * 6 + 5) {
+			    std::fprintf(stderr, "[kyty-gpu] restore: not a Kyty state record (%llu words)\n", static_cast<unsigned long long>(count));
 			    return false;
 		    }
 		    const auto* at = words + 2;
@@ -307,8 +308,10 @@ extern "C" __declspec(dllexport) bool kyty_gpu_restore_state(const uint64_t* wor
 			    data.scratch_size_dwords = static_cast<uint32_t>(at[5]);
 			    Libs::Graphics::ShaderMapUserData(at[0], data);
 		    }
+		    std::fprintf(stderr, "[kyty-gpu] restore: %llu shaders mapped\n", static_cast<unsigned long long>(words[1]));
 		    Libs::Graphics::HybridSetTessellationState(at);
 		    at += 5;
+		    std::fputs("[kyty-gpu] restore: tessellation rings set\n", stderr);
 		    const bool restored = Libs::VideoOut::HybridRestoreState(at, words + count);
 		    std::fprintf(stderr, "[kyty-gpu] restored %llu shaders, the tessellation rings and the video out ports: %s\n",
 		                 static_cast<unsigned long long>(words[1]), restored ? "ok" : "FAILED");

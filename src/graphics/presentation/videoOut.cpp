@@ -1972,13 +1972,18 @@ bool HybridRestoreState(const uint64_t*& words, const uint64_t* end) {
 		const auto output_mode = take();
 		const auto groups      = take();
 		if (words > end || handle < 1 || handle >= VideoOutDriver::Impl::VIDEO_OUT_NUM_MAX) {
+			std::fprintf(stderr, "[kyty-gpu] restore: bad video out port record (handle %d)\n", handle);
 			return false;
 		}
-		if (VideoOutOpen(255, VideoOutDriver::Impl::VIDEO_OUT_BUSES[handle - 1], 0, nullptr) != handle) {
+		if (const auto opened = VideoOutOpen(255, VideoOutDriver::Impl::VIDEO_OUT_BUSES[handle - 1], 0, nullptr); opened != handle) {
+			std::fprintf(stderr, "[kyty-gpu] restore: VideoOutOpen of port %d returned %d\n", handle, opened);
 			return false;
 		}
 		if (flip_rate != 0) {
-			VideoOutSetFlipRate(handle, flip_rate);
+			if (const auto result = VideoOutSetFlipRate(handle, flip_rate); result < 0) {
+				std::fprintf(stderr, "[kyty-gpu] restore: VideoOutSetFlipRate(%d, %d) returned %d\n", handle, flip_rate, result);
+				return false;
+			}
 		}
 		if (output_mode != VIDEO_OUT_OUTPUT_MODE_DEFAULT) {
 			std::fprintf(stderr, "[kyty-gpu] restore: port %d had output mode %llx, left at the default\n", handle,
@@ -1993,13 +1998,30 @@ bool HybridRestoreState(const uint64_t*& words, const uint64_t* end) {
 			}
 			VideoOutBufferAttribute2 attribute {};
 			std::memcpy(&attribute, attribute_bytes, sizeof(attribute));
-			const auto count = take();
+			const auto                   count = take();
+			std::vector<VideoOutBuffers> buffers;
+			int                          first = 0;
 			for (uint64_t b = 0; b < count; b++) {
-				const auto      index = static_cast<int>(take());
+				const auto index = static_cast<int>(take());
+				if (b == 0) {
+					first = index;
+				} else if (index != first + static_cast<int>(b)) {
+					std::fprintf(stderr, "[kyty-gpu] restore: port %d group %d has buffers out of order (%d after %d)\n", handle, group, index, first + static_cast<int>(b) - 1);
+					return false;
+				}
 				VideoOutBuffers buffer {};
 				buffer.data     = reinterpret_cast<const void*>(take());
 				buffer.metadata = reinterpret_cast<const void*>(take());
-				if (words > end || VideoOutRegisterBuffers2(handle, group, index, &buffer, 1, &attribute, category, nullptr) < 0) {
+				buffers.push_back(buffer);
+			}
+			if (words > end) {
+				std::fprintf(stderr, "[kyty-gpu] restore: the video out state ends inside port %d group %d\n", handle, group);
+				return false;
+			}
+			if (!buffers.empty()) {
+				const auto result = VideoOutRegisterBuffers2(handle, group, first, buffers.data(), static_cast<int>(buffers.size()), &attribute, category, nullptr);
+				if (result < 0) {
+					std::fprintf(stderr, "[kyty-gpu] restore: VideoOutRegisterBuffers2(port %d, group %d, buffers %d+%zu, category %d) returned %d\n", handle, group, first, buffers.size(), category, result);
 					return false;
 				}
 			}
