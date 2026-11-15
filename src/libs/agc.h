@@ -10,6 +10,12 @@ namespace Libs::Graphics {
 struct Shader;
 struct ShaderRegister;
 
+// The hybrid's frame capture: the tessellation rings the driver was given (5 words: TF base and size,
+// the three HS offchip values), and an invalidation of the GPU caches after the replay writes memory.
+void HybridGetTessellationState(uint64_t state[5]);
+void HybridSetTessellationState(const uint64_t state[5]);
+bool HybridInvalidateMemory(uint64_t vaddr, uint64_t size);
+
 struct SizeAlign {
 	uint64_t m_size;
 	size_t   m_align;

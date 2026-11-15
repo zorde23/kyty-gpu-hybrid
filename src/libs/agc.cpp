@@ -4253,6 +4253,32 @@ struct TessellationDriverState {
 
 static TessellationDriverState g_tessellation_driver_state {};
 
+} // namespace Gen5Driver
+
+void HybridGetTessellationState(uint64_t state[5]) {
+	const auto& s = Gen5Driver::g_tessellation_driver_state;
+	state[0]      = s.tf_ring_base;
+	state[1]      = s.tf_ring_size;
+	state[2]      = s.hs_offchip_value0;
+	state[3]      = s.hs_offchip_value1;
+	state[4]      = s.hs_offchip_value2;
+}
+
+void HybridSetTessellationState(const uint64_t state[5]) {
+	auto& s             = Gen5Driver::g_tessellation_driver_state;
+	s.tf_ring_base      = state[0];
+	s.tf_ring_size      = static_cast<uint32_t>(state[1]);
+	s.hs_offchip_value0 = state[2];
+	s.hs_offchip_value1 = state[3];
+	s.hs_offchip_value2 = state[4];
+}
+
+bool HybridInvalidateMemory(uint64_t vaddr, uint64_t size) {
+	return g_renderer != nullptr && g_renderer->InvalidateMemory(vaddr, size);
+}
+
+namespace Gen5Driver {
+
 static void submit_dcb(uint32_t* dcb, uint32_t size_in_dwords) {
 	GraphicsDbgDumpDcb("d", size_in_dwords, dcb);
 	EXIT_IF(g_renderer == nullptr);

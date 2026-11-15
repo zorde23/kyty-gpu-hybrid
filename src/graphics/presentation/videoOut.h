@@ -9,6 +9,8 @@
 
 #include <memory>
 
+#include <vector>
+
 namespace Libs::Graphics {
 class CommandBuffer;
 class Presenter;
@@ -104,6 +106,11 @@ KYTY_SYSV_ABI int VideoOutLatencyControlWaitBeforeInput(int handle);
 KYTY_SYSV_ABI int VideoOutLatencyMeasureSetStartPoint(int handle, uint32_t point);
 KYTY_SYSV_ABI int VideoOutColorSettingsSetGamma(VideoOutColorSettings* settings, float gamma);
 KYTY_SYSV_ABI int VideoOutAdjustColor(int handle, const VideoOutColorSettings* settings);
+
+// The hybrid's frame capture: the open ports (handle, flip rate, output mode, registered buffer groups) as
+// words, and their recreation in the replay through the same calls the game made.
+void HybridCaptureState(std::vector<uint64_t>& words);
+bool HybridRestoreState(const uint64_t*& words, const uint64_t* end);
 
 } // namespace Libs::VideoOut
 

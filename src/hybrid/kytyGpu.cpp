@@ -11,6 +11,8 @@
 #include "libs/controller.h"
 #include "graphics/presentation/window.h"
 #include "graphics/host_gpu/renderer/targetDump.h"
+#include "graphics/presentation/videoOut.h"
+#include "graphics/shader/shader.h"
 #include "hybrid/hybrid.h"
 #include "kernel/memory.h"
 #include "libs/libs.h"
@@ -258,6 +260,77 @@ extern "C" __declspec(dllexport) void kyty_gpu_wait_idle() {
 // GPU idle, so the game and its replay dump the first captured frame.
 extern "C" __declspec(dllexport) void kyty_gpu_request_target_dump() {
 	Libs::Graphics::TargetDump::StartCapture();
+}
+
+// The executable's frame capture: Kyty's state from the calls made before it starts (mapped shaders,
+// tessellation rings, video out ports) as words, written with the GPU idle and put back by the replay.
+constexpr uint64_t CaptureStateMagic = 0x3154535954594bull; // "KYTYST1"
+
+extern "C" __declspec(dllexport) uint64_t kyty_gpu_capture_state(uint64_t* out, uint64_t capacity) {
+	return Guarded(
+	    "kyty_gpu_capture_state",
+	    [&]() -> uint64_t {
+		    std::vector<uint64_t> words {CaptureStateMagic, 0};
+		    Libs::Graphics::ShaderForEachMapped([&](uint64_t addr, const Libs::Graphics::ShaderMappedData& data) {
+			    words[1]++;
+			    words.insert(words.end(), {addr, static_cast<uint64_t>(data.type), reinterpret_cast<uint64_t>(data.user_data),
+			                               reinterpret_cast<uint64_t>(data.input_semantics), data.num_input_semantics,
+			                               (static_cast<uint64_t>(data.code_size_bytes) << 32u) | data.scratch_size_dwords});
+		    });
+		    uint64_t tessellation[5] {};
+		    Libs::Graphics::HybridGetTessellationState(tessellation);
+		    words.insert(words.end(), std::begin(tessellation), std::end(tessellation));
+		    Libs::VideoOut::HybridCaptureState(words);
+		    if (out != nullptr && capacity >= words.size()) {
+			    std::copy(words.begin(), words.end(), out);
+		    }
+		    return words.size();
+	    },
+	    uint64_t {0});
+}
+
+extern "C" __declspec(dllexport) bool kyty_gpu_restore_state(const uint64_t* words, uint64_t count) {
+	return Guarded(
+	    "kyty_gpu_restore_state",
+	    [&]() -> bool {
+		    if (words == nullptr || count < 7 || words[0] != CaptureStateMagic || count < 2 + words[1] * 6 + 5) {
+			    return false;
+		    }
+		    const auto* at = words + 2;
+		    for (uint64_t i = 0; i < words[1]; i++, at += 6) {
+			    Libs::Graphics::ShaderMappedData data;
+			    data.type                = static_cast<Libs::Graphics::Prospero::ShaderBinaryType>(at[1]);
+			    data.user_data           = reinterpret_cast<Libs::Graphics::ShaderUserData*>(at[2]);
+			    data.input_semantics     = reinterpret_cast<Libs::Graphics::ShaderSemantic*>(at[3]);
+			    data.num_input_semantics = static_cast<uint32_t>(at[4]);
+			    data.code_size_bytes     = static_cast<uint32_t>(at[5] >> 32u);
+			    data.scratch_size_dwords = static_cast<uint32_t>(at[5]);
+			    Libs::Graphics::ShaderMapUserData(at[0], data);
+		    }
+		    Libs::Graphics::HybridSetTessellationState(at);
+		    at += 5;
+		    const bool restored = Libs::VideoOut::HybridRestoreState(at, words + count);
+		    std::fprintf(stderr, "[kyty-gpu] restored %llu shaders, the tessellation rings and the video out ports: %s\n",
+		                 static_cast<unsigned long long>(words[1]), restored ? "ok" : "FAILED");
+		    return restored;
+	    },
+	    false);
+}
+
+// The replay's memory is the process's own, not a donated section: the GPU reads it in place.
+extern "C" __declspec(dllexport) void kyty_gpu_map_in_place(uint64_t address, uint64_t bytes) {
+	Guarded(
+	    "kyty_gpu_map_in_place",
+	    [&]() -> bool {
+		    Libs::LibKernel::Memory::HybridMapPrivate(address, bytes);
+		    return true;
+	    },
+	    false);
+}
+
+// The replay wrote guest memory behind Kyty's back (a delta): the GPU caches drop what they hold there.
+extern "C" __declspec(dllexport) bool kyty_gpu_invalidate(uint64_t address, uint64_t bytes) {
+	return Guarded("kyty_gpu_invalidate", [&] { return Libs::Graphics::HybridInvalidateMemory(address, bytes); }, false);
 }
 
 extern "C" __declspec(dllexport) void kyty_gpu_prepare_host_write(uint64_t address, uint64_t bytes) {

@@ -119,6 +119,14 @@ void ShaderSetMapListener(ShaderMapListener listener, void* userdata) {
 	}
 }
 
+void ShaderForEachMapped(const std::function<void(uint64_t addr, const ShaderMappedData& data)>& visit) {
+	EXIT_IF(g_shader_map == nullptr);
+	std::scoped_lock lock(g_shader_map_mutex);
+	for (const auto& [addr, entry]: *g_shader_map) {
+		visit(addr, entry.data);
+	}
+}
+
 static ShaderMapEntry ShaderGetMappedData(uint64_t addr, const char* label) {
 	EXIT_IF(g_shader_map == nullptr);
 

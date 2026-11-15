@@ -1929,4 +1929,83 @@ KYTY_SYSV_ABI int VideoOutAdjustColor(int handle, const VideoOutColorSettings* s
 	return DriverState().Get(handle) == nullptr ? VIDEO_OUT_ERROR_INVALID_HANDLE : OK;
 }
 
+void HybridCaptureState(std::vector<uint64_t>& words) {
+	constexpr auto attribute_words = (sizeof(VideoOutBufferAttribute2) + 7) / 8;
+	for (int handle = 1; handle < VideoOutDriver::Impl::VIDEO_OUT_NUM_MAX; handle++) {
+		auto* cfg = DriverState().Get(handle);
+		if (cfg == nullptr) {
+			continue;
+		}
+		Common::LockGuard lock(cfg->mutex);
+		words.insert(words.end(), {static_cast<uint64_t>(handle), static_cast<uint64_t>(cfg->flip_rate), cfg->output_mode});
+		const auto groups_at = words.size();
+		words.push_back(0);
+		for (int group = 0; group < VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX; group++) {
+			if (!cfg->groups[group].occupied) {
+				continue;
+			}
+			words[groups_at]++;
+			words.insert(words.end(), {static_cast<uint64_t>(group), static_cast<uint64_t>(cfg->groups[group].category)});
+			uint64_t attribute[attribute_words] {};
+			std::memcpy(attribute, &cfg->groups[group].attribute, sizeof(VideoOutBufferAttribute2));
+			words.insert(words.end(), std::begin(attribute), std::end(attribute));
+			const auto buffers_at = words.size();
+			words.push_back(0);
+			for (int index = 0; index < VIDEO_OUT_BUFFER_NUM_MAX; index++) {
+				const auto& buffer = cfg->buffers[index];
+				if (buffer.group_index != group) {
+					continue;
+				}
+				words[buffers_at]++;
+				words.insert(words.end(), {static_cast<uint64_t>(index), buffer.data_address, buffer.metadata_address});
+			}
+		}
+	}
+}
+
+bool HybridRestoreState(const uint64_t*& words, const uint64_t* end) {
+	constexpr auto attribute_words = (sizeof(VideoOutBufferAttribute2) + 7) / 8;
+	const auto     take            = [&]() -> uint64_t { return words < end ? *words++ : (words = end + 1, 0); };
+	while (words < end) {
+		const auto handle      = static_cast<int>(take());
+		const auto flip_rate   = static_cast<int>(take());
+		const auto output_mode = take();
+		const auto groups      = take();
+		if (words > end || handle < 1 || handle >= VideoOutDriver::Impl::VIDEO_OUT_NUM_MAX) {
+			return false;
+		}
+		if (VideoOutOpen(255, VideoOutDriver::Impl::VIDEO_OUT_BUSES[handle - 1], 0, nullptr) != handle) {
+			return false;
+		}
+		if (flip_rate != 0) {
+			VideoOutSetFlipRate(handle, flip_rate);
+		}
+		if (output_mode != VIDEO_OUT_OUTPUT_MODE_DEFAULT) {
+			std::fprintf(stderr, "[kyty-gpu] restore: port %d had output mode %llx, left at the default\n", handle,
+			             static_cast<unsigned long long>(output_mode));
+		}
+		for (uint64_t g = 0; g < groups; g++) {
+			const auto group    = static_cast<int>(take());
+			const auto category = static_cast<int>(take());
+			uint64_t   attribute_bytes[attribute_words] {};
+			for (auto& word: attribute_bytes) {
+				word = take();
+			}
+			VideoOutBufferAttribute2 attribute {};
+			std::memcpy(&attribute, attribute_bytes, sizeof(attribute));
+			const auto count = take();
+			for (uint64_t b = 0; b < count; b++) {
+				const auto      index = static_cast<int>(take());
+				VideoOutBuffers buffer {};
+				buffer.data     = reinterpret_cast<const void*>(take());
+				buffer.metadata = reinterpret_cast<const void*>(take());
+				if (words > end || VideoOutRegisterBuffers2(handle, group, index, &buffer, 1, &attribute, category, nullptr) < 0) {
+					return false;
+				}
+			}
+		}
+	}
+	return words == end;
+}
+
 } // namespace Libs::VideoOut

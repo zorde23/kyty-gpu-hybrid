@@ -8,6 +8,7 @@
 #include "graphics/shader/shaderBindings.h"
 
 #include <array>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -368,6 +369,8 @@ using ShaderMapListener = void (*)(void* userdata, uint64_t hash, std::span<cons
 // Installs the listener (a null one removes it) and tells it at once about the shaders mapped
 // before. No call is in progress once it returns.
 void ShaderSetMapListener(ShaderMapListener listener, void* userdata);
+// Every mapped shader with the data it was mapped with (the hybrid's frame capture exports them).
+void ShaderForEachMapped(const std::function<void(uint64_t addr, const ShaderMappedData& data)>& visit);
 
 void     ShaderDbgDumpInputInfo(const ShaderVertexInputInfo& info);
 void     ShaderDbgDumpInputInfo(const ShaderPixelInputInfo& info);
