@@ -87,7 +87,7 @@ void LoadTitleForPipelineCache() noexcept {
 		std::error_code error;
 		const auto bytes = std::filesystem::file_size(cache, error);
 		std::fprintf(stderr, "[kyty-gpu] Vulkan pipeline cache %s: %s\n", std::filesystem::absolute(cache).string().c_str(),
-		             error ? "absent, created at exit" : (std::to_string(bytes) + " bytes").c_str());
+		             error ? "absent, written once a minute while running" :(std::to_string(bytes) + " bytes").c_str());
 	} catch (const std::exception& error) {
 		std::fprintf(stderr, "[kyty-gpu] param.json not loaded (%s): the Vulkan pipeline cache stays off\n", error.what());
 	}
