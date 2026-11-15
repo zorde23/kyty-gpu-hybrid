@@ -1,4 +1,5 @@
 ﻿#include "graphics/presentation/window.h"
+#include "hybrid/hybrid.h"
 
 #include "common/assert.h"
 #include "common/common.h"
@@ -25,7 +26,10 @@
 #include "loader/systemContent.h"
 
 #include <SDL3/SDL.h>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <thread>
 #include <filesystem>
 #include <fmt/format.h>
 #include <memory>
@@ -35,6 +39,7 @@
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 #include <dxgi1_6.h>
+#include <windows.h> // IWYU pragma: keep
 #include <wrl/client.h>
 #endif
 
@@ -189,6 +194,17 @@ static void GameEventQuit(WindowLoopState& game) {
 	LOGF("Event: quit\n");
 
 	game.need_exit = true;
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	if (Hybrid::Enabled()) {
+		// The hybrid's executable exits the process; if anything on the way hangs, the window must still close.
+		std::thread([] {
+			std::this_thread::sleep_for(std::chrono::seconds(10));
+			std::fprintf(stderr, "[kyty-gpu] the process did not exit within 10 s of closing the window: terminating it\n");
+			std::fflush(stderr);
+			TerminateProcess(GetCurrentProcess(), 0);
+		}).detach();
+	}
+#endif
 }
 
 static void GameEventTerminate(WindowLoopState& game) {

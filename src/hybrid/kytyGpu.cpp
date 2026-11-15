@@ -24,6 +24,10 @@
 #include <mutex>
 #include <string>
 
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+#include <windows.h> // IWYU pragma: keep
+#endif
+
 namespace Libs {
 LIB_DEFINE(InitAgcDriver_1);
 LIB_DEFINE(InitPad_1);
@@ -136,7 +140,15 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 			    subsystems.Initialize<Libs::Graphics::Lifecycle>();
 			    started.set_value();
 			    Libs::Graphics::WindowRun();
-			    std::quick_exit(0);
+			    // The window closed (Alt+F4): the executable owns the process, so its exit path runs (its shutdown,
+			    // then TerminateProcess). quick_exit ended in ExitProcess, whose DLL detach ran this DLL's static
+			    // destructors against threads already gone, and the process hung.
+			    std::fprintf(stderr, "[kyty-gpu] window closed: asking the executable to exit\n");
+			    if (const auto request_exit = Hybrid::Executable<void (*)(int)>("LibcRequestExit_nid_postfix")) {
+				    request_exit(0);
+				    return;
+			    }
+			    TerminateProcess(GetCurrentProcess(), 0);
 		    }).detach();
 		    ready.wait();
 		    return true;
