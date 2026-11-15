@@ -1,6 +1,7 @@
 #ifndef EMULATOR_SRC_HYBRID_HYBRID_H_
 #define EMULATOR_SRC_HYBRID_HYBRID_H_
 
+#include <atomic>
 #include <cstdint>
 
 // The AnyPS5 executable hosts Kyty's GPU as kyty_gpu.dll (the hybrid). The executable owns guest memory,
@@ -28,6 +29,8 @@ inline thread_local FaultStageTime g_fault_stage_time;
 // [hib-cp] every 10 s with [hib-flip]: the host memory queries (VirtualQuery) of the borrowed-mode readers,
 // on all threads and on the CP (Thread_Gpu), the CP's processors and affinity, and the busiest threads.
 void NoteHostQuery(uint64_t ns) noexcept;
+// ClampRangeSize in the hybrid: ranges inside one donated mapping, and the rest by the host's region type.
+inline std::atomic<uint64_t> g_clamp_donated {0}, g_clamp_image {0}, g_clamp_mapped {0}, g_clamp_private {0}, g_clamp_other {0};
 void SetCpThread() noexcept;
 
 [[nodiscard]] bool            Enabled() noexcept;

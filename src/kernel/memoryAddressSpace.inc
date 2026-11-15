@@ -618,6 +618,13 @@ public:
 		return true;
 	}
 
+	// The whole range lies inside one mapping (the hybrid's ClampRangeSize shortcut).
+	bool ContainedInOne(uint64_t vaddr, uint64_t size) {
+		std::shared_lock lock(m_mutex);
+		const auto* entry = FindContainingUnlocked(vaddr);
+		return entry != nullptr && size <= entry->vaddr + entry->size - vaddr;
+	}
+
 private:
 	struct MapEntry {
 		uint64_t            vaddr          = 0;
@@ -1059,6 +1066,7 @@ public:
 	}
 
 	bool BackingContains(uint64_t vaddr, uint64_t size) { return m_backing->Contains(vaddr, size); }
+	bool BackingContainedInOne(uint64_t vaddr, uint64_t size) { return m_backing->ContainedInOne(vaddr, size); }
 
 	bool Protect(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
 		std::lock_guard lock(m_mutex);

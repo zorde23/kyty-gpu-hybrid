@@ -219,6 +219,9 @@ void ReportHostQueries(uint64_t frames) {
 	std::fprintf(stderr,
 	             "[hib-cp] per frame: VirtualQuery CP %.1f calls %.3f ms, all threads %.1f calls %.3f ms; CP ran on processors 0x%llx, affinity 0x%llx, ideal %llu\n",
 	             per(cp_calls), per(cp_ns) / 1e6, per(calls), per(ns) / 1e6, static_cast<unsigned long long>(processors), affinity, ideal);
+	const auto donated = g_clamp_donated.exchange(0), image = g_clamp_image.exchange(0), mapped = g_clamp_mapped.exchange(0), priv = g_clamp_private.exchange(0), other = g_clamp_other.exchange(0);
+	std::fprintf(stderr, "[hib-cp] ClampRangeSize per frame: inside one donated mapping %.1f; to the system: image %.1f, mapped %.1f, private %.1f, other %.1f\n",
+	             per(donated), per(image), per(mapped), per(priv), per(other));
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	ReportThreads(frames);
 	ReportCallers();

@@ -1130,7 +1130,7 @@ bool TryReadAroundGpuWritesOnPage(uint64_t vaddr, void* data, uint64_t size,
 // has it committed and readable.
 // shortcut: one VirtualQuery per call, costly per resource (as DescribeCommitted was in the g5); before step 2,
 // answer from the ranges the executable reports (on_map/on_unmap/on_protect) instead of asking the system.
-static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size) {
+static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size, DWORD* first_type = nullptr) {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	struct Timed {
 		uint64_t start = Hybrid::FaultStageClockNs();
@@ -1142,6 +1142,9 @@ static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size) {
 		if (VirtualQuery(reinterpret_cast<const void*>(vaddr + readable), &info, sizeof(info)) == 0 ||
 		    info.State != MEM_COMMIT) {
 			break;
+		}
+		if (first_type != nullptr && readable == 0) {
+			*first_type = info.Type;
 		}
 		const auto end = std::min(size, reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize - vaddr);
 		// A donated page Kyty's tracker made no-access is still mapped: it is read through Kyty's view.
@@ -1160,8 +1163,31 @@ static uint64_t HybridReadableSize(uint64_t vaddr, uint64_t size) {
 uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size) {
 	EXIT_IF(g_virtual_ranges == nullptr);
 
-	const auto clamped_size =
-	    Hybrid::Enabled() ? HybridReadableSize(vaddr, size) : g_virtual_ranges->ClampRangeSize(vaddr, size);
+	uint64_t clamped_size = 0;
+	if (Hybrid::Enabled()) {
+		// Memory inside one donated mapping is mapped by definition: Kyty's own registry answers, no system call.
+		static const bool shortcut = [] {
+			const char* value = std::getenv("KYTY_HYB_CLAMP_DONATED");
+			return value != nullptr && std::strcmp(value, "1") == 0;
+		}();
+		const bool donated = g_guest_address_space->BackingContainedInOne(vaddr, size);
+		if (donated) {
+			Hybrid::g_clamp_donated.fetch_add(1, std::memory_order_relaxed);
+			if (shortcut) {
+				return size;
+			}
+		}
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		DWORD type = 0;
+		clamped_size = HybridReadableSize(vaddr, size, &type);
+		if (!donated)
+		(type == MEM_IMAGE ? Hybrid::g_clamp_image : type == MEM_MAPPED ? Hybrid::g_clamp_mapped : type == MEM_PRIVATE ? Hybrid::g_clamp_private : Hybrid::g_clamp_other).fetch_add(1, std::memory_order_relaxed);
+#else
+		clamped_size = HybridReadableSize(vaddr, size);
+#endif
+	} else {
+		clamped_size = g_virtual_ranges->ClampRangeSize(vaddr, size);
+	}
 	if (clamped_size == 0 && Hybrid::Enabled()) {
 		// The hybrid: memory the executable does not have mapped (freed while a descriptor still points at it).
 		// Readers zero-fill or refuse it, so the range is kept instead of ending the process.
@@ -1348,6 +1374,18 @@ static bool SelfTestSub64SharedPlaceholderAlias() {
 
 static bool ReplaceFixedRangeWithReserved(uint64_t start, uint64_t size);
 
+// The hybrid's ClampRangeSize shortcut: only a range inside one donated mapping counts.
+static bool SelfTestContainedInOne() {
+	GuestBackingStore    store(uint64_t {1} << 20u, true);
+	static uint8_t       host[0x8000];
+	constexpr uint64_t   base = 0x10000;
+	store.MapBorrowed(base, 0x4000, host, VirtualMemory::Mode::ReadWrite);
+	store.MapBorrowed(base + 0x4000, 0x4000, host + 0x4000, VirtualMemory::Mode::ReadWrite);
+	return store.ContainedInOne(base, 0x1000) && store.ContainedInOne(base + 0x4000, 0x4000) &&
+	       !store.ContainedInOne(base + 0x3000, 0x2000) && !store.ContainedInOne(base + 0x7000, 0x2000) &&
+	       !store.ContainedInOne(base + 0x20000, 0x10) && store.Contains(base + 0x3000, 0x2000);
+}
+
 void Initialize() {
 	const auto params = Loader::SystemContentGetMemoryParams();
 	if (params.flexible_size != 0) {
@@ -1373,6 +1411,10 @@ void Initialize() {
 	g_flexible_memory     = std::make_unique<FlexibleMemory>();
 	g_pooled_memory       = std::make_unique<PooledMemory>();
 	g_virtual_ranges      = std::make_unique<VirtualRanges>();
+	if (Hybrid::Enabled()) {
+		EXIT_IF(!SelfTestContainedInOne());
+		std::fprintf(stderr, "[hib-mem] ClampRangeSize shortcut self test ok (donated, across two mappings, partial, not donated)\n");
+	}
 	if (!Hybrid::Enabled()) {
 		EXIT_IF(!g_guest_address_space->SelfTest());
 		EXIT_IF(!SelfTestSub64SharedPlaceholderAlias());
