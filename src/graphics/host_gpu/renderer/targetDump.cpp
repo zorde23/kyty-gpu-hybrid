@@ -347,6 +347,48 @@ uint32_t DepthBytes(vk::Format format) {
 	}
 }
 
+// Bytes of a 4x4 block for the BC formats the dump decodes (BC1, BC3), or 0.
+uint32_t BcBlockBytes(vk::Format format) {
+	switch (format) {
+		case vk::Format::eBc1RgbUnormBlock: case vk::Format::eBc1RgbSrgbBlock:
+		case vk::Format::eBc1RgbaUnormBlock: case vk::Format::eBc1RgbaSrgbBlock: return 8;
+		case vk::Format::eBc3UnormBlock: case vk::Format::eBc3SrgbBlock: return 16;
+		default: return 0;
+	}
+}
+
+// One texel of a BC1 color block (the last 8 bytes of a BC3 block), as BGR.
+// shortcut: color only; BC3 alpha is not shown (the BMP has no alpha channel).
+void DecodeBc1Texel(const uint8_t* block, uint32_t index, uint8_t* bgr) {
+	const uint16_t c0 = static_cast<uint16_t>(block[0] | (block[1] << 8));
+	const uint16_t c1 = static_cast<uint16_t>(block[2] | (block[3] << 8));
+	const auto     rgb = [](uint16_t c, int i) {
+		const uint32_t v = i == 0 ? (c >> 11) & 31u : i == 1 ? (c >> 5) & 63u : c & 31u;
+		return i == 1 ? (v * 255u + 31u) / 63u : (v * 255u + 15u) / 31u;
+	};
+	const uint32_t code = (block[4 + index / 4] >> ((index % 4) * 2)) & 3u;
+	for (int i = 0; i < 3; ++i) {
+		const uint32_t a = rgb(c0, i);
+		const uint32_t b = rgb(c1, i);
+		uint32_t       v = code == 0 ? a : code == 1 ? b : 0;
+		if (code >= 2) {
+			v = c0 > c1 ? (code == 2 ? (2 * a + b) / 3 : (a + 2 * b) / 3) : (code == 2 ? (a + b) / 2 : 0);
+		}
+		bgr[2 - i] = static_cast<uint8_t>(v);
+	}
+}
+
+// Self-check of DecodeBc1Texel on a known block: c0 red, c1 blue, codes 0..3 on texels 0..3.
+void CheckBc1Decode() {
+	constexpr uint8_t block[8] = {0x00, 0xf8, 0x1f, 0x00, 0xe4, 0x00, 0x00, 0x00};
+	constexpr uint8_t want[4][3] = {{0, 0, 255}, {255, 0, 0}, {85, 0, 170}, {170, 0, 85}};
+	for (uint32_t i = 0; i < 4; ++i) {
+		uint8_t bgr[3] {};
+		DecodeBc1Texel(block, i, bgr);
+		EXIT_IF(std::memcmp(bgr, want[i], 3) != 0);
+	}
+}
+
 float DepthValue(vk::Format format, const uint8_t* p) {
 	uint32_t w = 0;
 	std::memcpy(&w, p, DepthBytes(format));
@@ -462,9 +504,12 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 	const bool stencil  = kind == Kind::Stencil;
 	const bool has_stencil = format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint ||
 	                         format == vk::Format::eD16UnormS8Uint || format == vk::Format::eS8Uint;
-	const auto info = depth     ? std::optional<FormatInfo>(FormatInfo {DepthBytes(format)})
-	                  : stencil ? std::optional<FormatInfo>(FormatInfo {has_stencil ? 1u : 0u})
-	                            : Describe(format);
+	const auto bc_block = depth || stencil ? 0u : BcBlockBytes(format);
+	// A BC image copies out as packed blocks; one byte per texel bounds the staging size.
+	const auto info = depth      ? std::optional<FormatInfo>(FormatInfo {DepthBytes(format)})
+	                  : stencil  ? std::optional<FormatInfo>(FormatInfo {has_stencil ? 1u : 0u})
+	                  : bc_block ? std::optional<FormatInfo>(FormatInfo {1u})
+	                             : Describe(format);
 	p.format  = vk::to_string(format);
 	p.samples = image.backing.samples;
 	if (image.backing.image_type == vk::ImageType::e3D) {
@@ -557,6 +602,18 @@ bool ReadBack(RenderContext& context, CommandBuffer& buffer, Image& image, Kind 
 			}
 		}
 		p.note += fmt::format("depth {:.6f}..{:.6f}", lo, hi);
+	} else if (bc_block != 0) {
+		const uint32_t blocks_wide = (extent.width + 3u) / 4u;
+		for (uint32_t y = 0; y < p.height; ++y) {
+			for (uint32_t x = 0; x < p.width; ++x) {
+				const uint32_t tx    = x * step;
+				const uint32_t ty    = y * step;
+				const auto*    block = source + (static_cast<size_t>(ty / 4u) * blocks_wide + tx / 4u) * bc_block;
+				DecodeBc1Texel(block + (bc_block - 8u), (ty % 4u) * 4u + tx % 4u,
+				               &p.pixels[static_cast<size_t>(y) * row + x * 3u]);
+			}
+		}
+		p.note += "bc color";
 	} else if (stencil) {
 		// Each stencil value its own color; 0 stays black.
 		uint32_t seen = 0;
@@ -699,6 +756,7 @@ void Init() {
 		g_each_to   = end != nullptr && *end == '-' ? static_cast<uint32_t>(std::strtoul(end + 1, nullptr, 10))
 		                                            : g_each_from;
 	}
+	CheckBc1Decode();
 	GpuBreadcrumbs::TrackPipelines();
 	Log::WriteToConsoleAndLog(fmt::format(
 	    "Target dump: on (F9{}{})\n", g_at_flip != 0 ? fmt::format(", at flip {}", g_at_flip) : "",
