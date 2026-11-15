@@ -3803,6 +3803,10 @@ bool HybridWaitGpuGfxIdleFor(uint32_t millis) {
 	return g_gpu_resources == nullptr || g_gpu_resources->GetGpu().WaitForGfxIdleFor(millis);
 }
 
+bool HybridWaitGpuQuietFor(uint32_t millis, uint32_t* blocked) {
+	return g_gpu_resources == nullptr || g_gpu_resources->GetGpu().WaitForQuietFor(millis, blocked);
+}
+
 std::vector<uint32_t> HybridGpuBusyQueues() {
 	return g_gpu_resources == nullptr ? std::vector<uint32_t> {} : g_gpu_resources->GetGpu().BusyQueues();
 }

@@ -776,8 +776,11 @@ void CommandProcessor::RunGarbageCollector() {
 	EmitCallback([this] { m_renderer.RunGarbageCollector(); });
 }
 
-void CommandProcessor::WaitForRewind(bool valid) {
-	if (!valid) {
+void CommandProcessor::WaitForRewind(const uint32_t* body) {
+	if ((*body & 0x80000000u) == 0) {
+		if (g_gpu_state != nullptr) {
+			g_gpu_state->NoteBlockedWait(reinterpret_cast<uint64_t>(body), sizeof(*body));
+		}
 		SuspendPm4();
 	}
 }
@@ -1023,6 +1026,101 @@ bool GuestGpu::WaitForGfxIdleFor(uint32_t millis) {
 		m_idle.WaitFor(&m_queue_mutex, static_cast<uint32_t>(std::min<int64_t>(left, 10000)));
 	}
 	return true;
+}
+
+bool GuestGpu::WaitForQuietFor(uint32_t millis, uint32_t* blocked) {
+	EXIT_IF(IsGpuThread() || CommandScheduler::InDeferredOperation());
+	const auto        deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(millis);
+	Common::LockGuard lock(m_queue_mutex);
+	const auto quiet = [this] {
+		if (m_processing || !m_commands.empty() || (m_pipelined && m_executed.Load() < m_emitted)) {
+			return false;
+		}
+		return std::all_of(m_queues.begin(), m_queues.end(), [](const auto& queue) { return queue.empty() || queue.front().blocked; });
+	};
+	while (!quiet()) {
+		const auto now = std::chrono::steady_clock::now();
+		if (now >= deadline) {
+			return false;
+		}
+		const auto left = std::chrono::duration_cast<std::chrono::microseconds>(deadline - now).count();
+		m_idle.WaitFor(&m_queue_mutex, static_cast<uint32_t>(std::min<int64_t>(left, 10000)));
+	}
+	if (blocked != nullptr) {
+		*blocked = m_submission_count;
+	}
+	return true;
+}
+
+void GuestGpu::CaptureBlocked(std::vector<uint64_t>& words) {
+	Common::LockGuard lock(m_queue_mutex);
+	for (uint32_t queue = 0; queue < QueueCount; queue++) {
+		for (const auto& submission: m_queues[queue]) {
+			if (submission.type != SubmissionType::Commands) {
+				std::fprintf(stderr, "[kyty-gpu] capture: queue %u holds a non-command submission (type %d): not kept\n", queue,
+				             static_cast<int>(submission.type));
+				continue;
+			}
+			const auto& execution = submission.execution;
+			words.insert(words.end(), {queue, reinterpret_cast<uint64_t>(submission.commands.data()), submission.commands.size(),
+			                           execution.m_buffer_stack.size()});
+			for (const auto& cursor: execution.m_buffer_stack) {
+				words.insert(words.end(), {reinterpret_cast<uint64_t>(cursor.commands.data()), cursor.commands.size(), cursor.offset_dw});
+			}
+			words.insert(words.end(), {reinterpret_cast<uint64_t>(execution.m_next_buffer.data()), execution.m_next_buffer.size(),
+			                           static_cast<uint64_t>(execution.m_chain)});
+		}
+	}
+}
+
+bool GuestGpu::RestoreBlocked(const uint64_t* words, const uint64_t* end) {
+	const auto span = [](uint64_t address, uint64_t size) {
+		return std::span<const uint32_t>(reinterpret_cast<const uint32_t*>(address), static_cast<size_t>(size));
+	};
+	Common::LockGuard lock(m_queue_mutex);
+	while (words < end) {
+		if (end - words < 4) {
+			return false;
+		}
+		Submission submission;
+		submission.type     = SubmissionType::Commands;
+		submission.queue_id = static_cast<uint32_t>(words[0]);
+		submission.commands = span(words[1], words[2]);
+		const auto cursors  = words[3];
+		words += 4;
+		if (submission.queue_id >= QueueCount || static_cast<uint64_t>(end - words) < cursors * 3 + 3) {
+			return false;
+		}
+		for (uint64_t i = 0; i < cursors; i++, words += 3) {
+			submission.execution.m_buffer_stack.push_back({span(words[0], words[1]), static_cast<uint32_t>(words[2])});
+		}
+		submission.execution.m_next_buffer = span(words[0], words[1]);
+		submission.execution.m_chain       = words[2] != 0;
+		words += 3;
+		if (submission.queue_id != 0) {
+			GetProcessor(submission.queue_id);
+		}
+		m_queues[submission.queue_id].push_back(std::move(submission));
+		m_submission_count++;
+	}
+	m_work_available.Signal();
+	return true;
+}
+
+bool GuestGpu::SelfTestRewind() {
+	static uint32_t dcb[2] = {0xC0005900u, 0};
+	const std::vector<uint64_t> record {0, reinterpret_cast<uint64_t>(dcb), 2, 0, 0, 0, 0};
+	if (!RestoreBlocked(record.data(), record.data() + record.size())) {
+		std::fputs("[kyty-gpu] self test: the rewind submission could not be queued\n", stderr);
+		return false;
+	}
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	const bool waited = !WaitForIdleFor(0);
+	std::atomic_ref<uint32_t>(dcb[1]).store(0x80000000u, std::memory_order_release);
+	const bool resumed = WaitForIdleFor(2000);
+	std::fprintf(stderr, "[kyty-gpu] self test: a queued rewind %s while its bit was clear and %s once it was set\n",
+	             waited ? "waited" : "did NOT wait", resumed ? "finished" : "did NOT finish");
+	return waited && resumed;
 }
 
 std::vector<uint32_t> GuestGpu::BusyQueues() {

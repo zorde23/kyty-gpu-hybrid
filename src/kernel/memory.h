@@ -272,6 +272,7 @@ bool HybridWaitGpuIdleFor(uint32_t millis);
 std::string HybridDescribeGpuBusy();
 bool HybridWaitGpuGfxIdleFor(uint32_t millis);
 std::vector<uint32_t> HybridGpuBusyQueues();
+bool HybridWaitGpuQuietFor(uint32_t millis, uint32_t* blocked);
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)

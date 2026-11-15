@@ -4287,6 +4287,20 @@ bool HybridRestoreRegisters(const uint64_t* words, const uint64_t* end) {
 	return g_renderer != nullptr && g_renderer->GetGpu().RestoreRegisters(words, end);
 }
 
+void HybridCaptureBlocked(std::vector<uint64_t>& words) {
+	if (g_renderer != nullptr) {
+		g_renderer->GetGpu().CaptureBlocked(words);
+	}
+}
+
+bool HybridRestoreBlocked(const uint64_t* words, const uint64_t* end) {
+	return g_renderer != nullptr && g_renderer->GetGpu().RestoreBlocked(words, end);
+}
+
+bool HybridSelfTestRewind() {
+	return g_renderer != nullptr && g_renderer->GetGpu().SelfTestRewind();
+}
+
 namespace Gen5Driver {
 
 static void submit_dcb(uint32_t* dcb, uint32_t size_in_dwords) {

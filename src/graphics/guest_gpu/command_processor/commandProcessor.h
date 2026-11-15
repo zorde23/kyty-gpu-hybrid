@@ -40,6 +40,7 @@ public:
 
 private:
 	friend class CommandProcessor;
+	friend class GuestGpu;
 
 	struct BufferCursor {
 		std::span<const uint32_t> commands;
@@ -147,7 +148,7 @@ public:
 	// Executes an operation this command processor produced.
 	void Execute(GpuOperation& operation);
 
-	void WaitForRewind(bool valid);
+	void WaitForRewind(const uint32_t* body);
 
 	template <typename T>
 	void WaitRegMem(uint32_t func, const T* addr, T ref, T mask, uint32_t wait_op);

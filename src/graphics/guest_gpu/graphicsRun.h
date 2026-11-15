@@ -63,6 +63,15 @@ public:
 	bool              WaitForGfxIdleFor(uint32_t millis);
 	// The queues with queued submissions (0 = gfx, then compute).
 	std::vector<uint32_t> BusyQueues();
+	// Quiet: nothing being processed or executed, and every queued submission blocked (on a wait or a
+	// rewind), so the GPU does not change memory. `blocked` gets the number of queued submissions.
+	bool              WaitForQuietFor(uint32_t millis, uint32_t* blocked);
+	// The queued command submissions (queue, buffer, execution cursor) as words, and their requeueing in
+	// the replay, so a submission blocked at the capture resumes when the replay writes what it waits on.
+	void              CaptureBlocked(std::vector<uint64_t>& words);
+	bool              RestoreBlocked(const uint64_t* words, const uint64_t* end);
+	// Queues a rewind whose bit is clear, checks it waits, sets the bit and checks it finishes.
+	bool              SelfTestRewind();
 	[[nodiscard]] int GetFrameNum() const;
 
 	// The thread that owns the renderer: the execution thread of a pipelined GPU.
