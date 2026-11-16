@@ -1905,7 +1905,7 @@ static void ReadGuestAroundGpuWrites(uint64_t vaddr, void* data, uint64_t size) 
 	}
 }
 
-// Games using sce::Psr (GTA V) refit the BLASes of their animated geometry every frame with
+// Games using sce::Psr (the title) refit the BLASes of their animated geometry every frame with
 // Psr_Gpu_BottomLevelBvh_FanRefit, four Psr shaders dispatched once per BLAS (one of them once per
 // geometry): psr_qbvh_fan_refit_copy_dispatch_args (the indirect arguments of the next one, from
 // the BLAS header), psr_qbvh_fan_refit_async (the vertices of a geometry's triangle nodes, from
@@ -2000,7 +2000,7 @@ void CommandProcessor::EmitHleRefit() {
 	});
 }
 
-// Games using sce::Psr (GTA V builds the four TLASes of its ray tracing passes every frame) build
+// Games using sce::Psr (the title builds the four TLASes of its ray tracing passes every frame) build
 // TLASes in the kBase format with Psr_Gpu_TopLevelBvh_Build: 18 Psr shaders, each dispatched
 // once per TLAS (psr_morton_rotate_tree_top more often), several of which wait for the GPU. With
 // native ray tracing, the stage is replaced by NativeRayTracing::RecordHleTlas(): its dispatches
@@ -2364,7 +2364,7 @@ void CommandProcessor::ExecuteReleaseMem(uint32_t data_sel, bool interrupt, void
 		}
 	};
 	// Occlusion counters reach guest memory in a priority completion once the GPU got past
-	// their dump. A label released after a dump tells the guest that the counters are there: GTA
+	// their dump. A label released after a dump tells the guest that the counters are there: the title
 	// San Andreas DE writes one into every query object after its end dump and reads the query
 	// once it is set. On the console the label lands after the counters, so it goes behind them
 	// through the same completions instead of being written now. Labels keep their order: while

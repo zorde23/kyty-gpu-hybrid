@@ -121,10 +121,10 @@ public:
 	void RunGarbageCollector();
 	// Runs a host command in operation order.
 	void EmitHostCommand(Common::UniqueFunction<void>&& command);
-	// GTA V's TLAS builds, replaced by native ones (see graphicsRun.cpp); true when the dispatch
+	// The title's TLAS builds, replaced by native ones (see graphicsRun.cpp); true when the dispatch
 	// is dropped.
 	bool HleTlasDispatch(uint64_t data_addr);
-	// GTA V's BLAS refits, replaced by native ones (see graphicsRun.cpp); true when the dispatch
+	// The title's BLAS refits, replaced by native ones (see graphicsRun.cpp); true when the dispatch
 	// is dropped.
 	bool HleBlasDispatch(uint64_t data_addr);
 	void EmitHleRefit();

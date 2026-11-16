@@ -30,7 +30,7 @@ struct GraphicContext;
 
 // Host acceleration structures for guest ray tracing (VK_KHR_acceleration_structure).
 //
-// GTA V builds AMD BVHs with its own compute shaders and traverses them in software with
+// The title builds AMD BVHs with its own compute shaders and traverses them in software with
 // IMAGE_BVH_INTERSECT_RAY, one node at a time. Before a dispatch that traces through such a
 // BVH, this class mirrors it on the GPU, without the CPU reading what the GPU wrote:
 // - every leaf of the guest top-level BVH (an instance) becomes a host TLAS instance with the
@@ -92,7 +92,7 @@ public:
 	void Prepare(const CommandRecorder& command, uint64_t user_pointer, const TlasSource& source,
 	             const vk::DescriptorBufferInfo& flattened_srt, uint64_t frame);
 
-	// GTA V's TLAS builds (see CommandProcessor::HleTlasDispatch()): records the build of a TLAS
+	// The title's TLAS builds (see CommandProcessor::HleTlasDispatch()): records the build of a TLAS
 	// in the game's format at `header_va` from the instance list the game's CPU writes (`count`
 	// records of `stride` bytes at `input_va`, see hle_tlas.comp). Outside a render pass.
 	void RecordHleTlas(const CommandRecorder& command, uint64_t input_va, uint32_t count,
@@ -103,7 +103,7 @@ public:
 	// nothing else); returns the TLAS size.
 	static uint32_t HleTlasHeader(uint32_t count, std::array<uint32_t, 32>& header) noexcept;
 
-	// GTA V's BLAS refits (see CommandProcessor::HleBlasDispatch()): a geometry of a refit BLAS
+	// The title's BLAS refits (see CommandProcessor::HleBlasDispatch()): a geometry of a refit BLAS
 	// with its vertex buffer V# and object matrix (column-major), as the game's CPU wrote them.
 	struct HleRefitGeometry {
 		uint64_t                 blas     = 0;

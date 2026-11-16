@@ -67,7 +67,7 @@ QString ClientId() {
 }
 
 QString UserAgent() {
-	return QStringLiteral("KytyPS5-GTA-launcher/") + QString::fromLatin1(KYTY_GIT_HASH);
+	return QStringLiteral("kyty-gpu-hybrid-launcher/") + QString::fromLatin1(KYTY_GIT_HASH);
 }
 
 #if defined(_WIN32)

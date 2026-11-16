@@ -12,7 +12,7 @@ exports each partition as `.kpm` files ready to merge into `assets/pipelines`.
 ## Seeds: the manifests of the repository
 
 At every start, before listening, the server downloads the `.kpm` files of the repository
-(`assets/pipelines` on `main` of `TheCruZ/KytyPS5-GTA`, through the public GitHub API; a file is
+(`assets/pipelines` on `main` of `zorde23/kyty-gpu-hybrid`, through the public GitHub API; a file is
 only downloaded when its Git blob id changed and its content is checked against it) and keeps a
 copy in `<data-dir>/seeds/main/`. Their records are **published** (given a sequence number, in
 file order, so modules come before the pipelines that name them) unless already published: the
@@ -51,7 +51,7 @@ cargo build --release
 |---|---|---|
 | `--listen` | `127.0.0.1:8787` | HTTP address (HTTPS goes through a reverse proxy) |
 | `--data-dir` | `data` | `state.json`, `export/` and `seeds/` |
-| `--seed-repo` / `--seed-ref` / `--seed-path` | `TheCruZ/KytyPS5-GTA` / `main` / `assets/pipelines` | where the seeds are downloaded from at every start |
+| `--seed-repo` / `--seed-ref` / `--seed-path` | `zorde23/kyty-gpu-hybrid` / `main` / `assets/pipelines` | where the seeds are downloaded from at every start |
 | `--seed-api` / `--seed-timeout` | `https://api.github.com` / 60 | GitHub API and seconds for all the downloads of a start (then the copies on disk are used) |
 | `--no-seed` | off | no download and no copies from `seeds/` (tests, offline) |
 | `--default-release` | `default` | release whose records are left out for clients that send neither `proto` nor `have`. If `--known` has no release with that name and it is not `default`, it is downloaded once from the tag of that name (`v19`) |

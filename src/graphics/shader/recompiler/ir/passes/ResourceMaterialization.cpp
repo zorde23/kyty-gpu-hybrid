@@ -1119,7 +1119,7 @@ bool MaterializeIndirectDescriptor(const ResourcePlan&                         p
 	const auto key_count = sources.empty() ? selected_keys.size() : sources.size();
 	// The mapping's layout is part of the shader permutation (its offset in the flattened SRT
 	// and the number of search steps), while the number of keys follows guest data from dispatch
-	// to dispatch (GTA V's ray tracing shader saw dozens of permutations, each a multi-second
+	// to dispatch (the title's ray tracing shader saw dozens of permutations, each a multi-second
 	// pipeline compile). Reserve room for a power-of-two number of keys instead: the shader
 	// searches the runtime count, and later mappings keep their offsets until a count crosses a
 	// power of two.

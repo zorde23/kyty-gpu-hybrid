@@ -1,6 +1,6 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
-// Native ray tracing: walks one guest bottom-level AMD BVH per workgroup (GTA V layout: box nodes
+// Native ray tracing: walks one guest bottom-level AMD BVH per workgroup (the title layout: box nodes
 // whose leaves are lists of 8-byte entries in the BLAS buffer: an AMD triangle node pointer and a
 // primitive word, bit 31 = last entry, bit 30 = opaque).
 // MODE_COUNT: counts box nodes, leaves and triangles (opaque, alpha tested) of the BLASes the

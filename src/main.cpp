@@ -129,7 +129,7 @@ static void PrintUsage() {
 	    "  --no-async-pipelines                 Wait for new pipelines instead of skipping the\n"
 	    "                                       draws that need them while they compile.\n");
 	::printf("  --native-raytracing                  Experimental: trace the ray tracing passes of\n"
-	         "                                       supported games (GTA V, ASTRO BOT) with the host\n"
+	         "                                       supported games (the title, ASTRO BOT) with the host\n"
 	         "                                       GPU's ray tracing hardware. Default: off.\n");
 	::printf("  --shader-log-direction <value>       Silent, Console, or File.\n");
 	::printf("  --shader-log-folder <path>           Shader log output folder.\n");

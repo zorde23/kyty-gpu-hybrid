@@ -1020,7 +1020,7 @@ void WindowContext::CreateVulkan() {
 		EXIT("Could not create Vulkan memory allocator");
 	}
 
-	// GTA V's ray tracing shader selects up to ~200 T#s by key from guest data that changes every
+	// The title's ray tracing shader selects up to ~200 T#s by key from guest data that changes every
 	// frame; each new layout is a pipeline compile of several seconds.
 	ShaderRecompiler::IR::SetComputeIndirectFloors(256, 8);
 	render_context = std::make_unique<RenderContext>(graphic_ctx);

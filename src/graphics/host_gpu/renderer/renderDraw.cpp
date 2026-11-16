@@ -1614,7 +1614,7 @@ static bool RecordsNoMipStats(const ShaderStageRuntime& stage) {
 
 // Whether a draw may be skipped while the driver compiles its pipeline: the picture is all it
 // changes. Its shaders write no memory, its samples reach no guest occlusion counter and it
-// renders to no linear image (the CPU reads those back, e.g. GTA V's vehicle damage).
+// renders to no linear image (the CPU reads those back, e.g. The title's vehicle damage).
 static bool DrawOnlyChangesPicture(RenderContext& context, const DrawRenderState& state,
                                    std::span<const ShaderVertexInputInfo> vertex_stages) {
 	const auto writes_memory = [](const ShaderStageRuntime& stage) {

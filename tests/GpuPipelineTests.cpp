@@ -645,7 +645,7 @@ void TestOcclusionCounters() {
 void TestPackedColorClear16() {
 	using Libs::Graphics::DecodePackedColorClear;
 	vk::ClearColorValue clear {};
-	// GTA V clears its R16_FLOAT particle depth target to the largest half (0x7bff) with a
+	// The title clears its R16_FLOAT particle depth target to the largest half (0x7bff) with a
 	// register fast clear; dropping it left the MIN-blended target at zero.
 	Check(DecodePackedColorClear(vk::Format::eR16Sfloat, 0x00007bffu, clear) &&
 	          clear.float32[0] == 65504.0f,

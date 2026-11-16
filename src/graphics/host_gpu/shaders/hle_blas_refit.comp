@@ -1,6 +1,6 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
-// HLE of GTA V's BLAS refits (see CommandProcessor::HleBlasDispatch()): every frame the game
+// HLE of the title's BLAS refits (see CommandProcessor::HleBlasDispatch()): every frame the game
 // updates the BLASes of animated geometry in place: the vertices of their triangle nodes from
 // the geometry's vertex buffer and then, bottom up, the boxes of their box32 nodes. The topology
 // stays.

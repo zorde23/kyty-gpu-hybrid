@@ -1641,10 +1641,10 @@ const ShaderModule* PipelineCache::GetAhead(const ShaderParams& params, InputInf
 	                    : std::ranges::find_if(modules, matches);
 	if (module == modules.end()) {
 		// A specialization made of stale bytes of GPU-written memory is usually one the execution
-		// thread never asks for (in GTA V, V#s of garbage strides: thousands of permutations of
+		// thread never asks for (in the title, V#s of garbage strides: thousands of permutations of
 		// some compute shaders, each compiled, stored and given a pipeline). So is one whose walk
 		// left a GPU-produced branch condition unread: it reached both sides, and the resources
-		// of the side the shader does not run hold leftovers (in GTA SA, user data V#s with
+		// of the side the shader does not run hold leftovers (in the title SA, user data V#s with
 		// ADD_TID or reserved dst_sel that no vertex program compiles). Only the execution
 		// thread's own lookup compiles those.
 		if (!ahead.reads.MayHaveReadGpuWrites() && !t_ahead_unread_load) {

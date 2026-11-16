@@ -5,7 +5,7 @@
 
 namespace Libs::Graphics::Psr {
 
-// sce::Psr is Sony's ray tracing BVH library, linked statically into the games that use it (GTA
+// sce::Psr is Sony's ray tracing BVH library, linked statically into the games that use it (the title
 // V, Astro Bot, Marvel's Wolverine). It builds and refits BVHs on the GPU with its own compute
 // shaders, dispatched like any other compute work (there is nothing to intercept on the CPU), and
 // registers each shader by name with the driver (owner "sce::Psr", see
@@ -67,7 +67,7 @@ enum class Shader : uint8_t {
 // The generations of the library whose user data layouts the emulator knows.
 enum class Generation : uint8_t {
 	Unknown,
-	// 460 shaders: GTA V (build J03180688) and Astro Bot (J03093718).
+	// 460 shaders: the title (build J03180688) and Astro Bot (J03093718).
 	Base460,
 };
 

@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn component_checks() {
-        assert!(valid_component("TheCruZ/KytyPS5-GTA"));
+        assert!(valid_component("zorde23/kyty-gpu-hybrid"));
         assert!(valid_component("assets/pipelines"));
         assert!(!valid_component("a/../b"));
         assert!(!valid_component("a b"));

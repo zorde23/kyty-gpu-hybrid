@@ -517,7 +517,7 @@ void MainDialogPrivate::ReadSettings(QSettings& s) {
 	PipelineSharing::ReadSettings(s);
 }
 
-// This fork tests every game with these settings. They came from GTA V (PPSA04263, PPSA04264):
+// This fork tests every game with these settings. They came from the title:
 // without red zone protection its streaming thread crashes, without linear image readback cars
 // deform wildly in collisions, without tiled image readback boats and jet skis do not ride the
 // waves, and without tessellation the trunks of nearby trees are not drawn. Native ray tracing

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
-    # KytyPS5-GTA: pushing a v* tag (v1, v2, ...) publishes a fork release.
+    # kyty-gpu-hybrid: pushing a v* tag (v1, v2, ...) publishes a fork release.
     tags: [ 'v*' ]
   pull_request:
 
@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           if [[ "$GITHUB_REPOSITORY" != "KytyPS5/KytyPS5" && "$GITHUB_REF_TYPE" == "tag" ]]; then
-            echo "value=KytyPS5-GTA-$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "value=kyty-gpu-hybrid-$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
             echo "value=KytyPS5-$(date -u +'%Y-%m-%d')-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
@@ -89,7 +89,7 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.11
 
-      # pgo/gtav.profdata was recorded with LLVM 22.1.8: a profile written by a newer
+      # pgo/title.profdata was recorded with LLVM 22.1.8: a profile written by a newer
       # LLVM than the compiler that reads it fails with "unsupported instrumentation profile format version",
       # and the runner's Visual Studio ships an older clang-cl. Use the same version as the profile.
       - name: Install LLVM 22.1.8
@@ -106,7 +106,7 @@ jobs:
       - name: Check the PGO profile
         shell: pwsh
         run: |
-          $profile = (Join-Path $env:GITHUB_WORKSPACE "pgo/gtav.profdata") -replace '\\', '/'
+          $profile = (Join-Path $env:GITHUB_WORKSPACE "pgo/title.profdata") -replace '\\', '/'
           $ok = $false
           if (Test-Path $profile) {
             & "C:\LLVM-22.1.8\bin\llvm-profdata.exe" show $profile *> $null
@@ -119,7 +119,7 @@ jobs:
             $hash = (Get-FileHash -Algorithm SHA256 $profile).Hash.Substring(0, 16)
             "SCCACHE_GHA_VERSION=pgo-$hash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           } else {
-            Write-Host "::warning::pgo/gtav.profdata is missing or unreadable: building without PGO"
+            Write-Host "::warning::pgo/title.profdata is missing or unreadable: building without PGO"
             "KYTY_PGO_PROFILE=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           # The failed llvm-profdata call above must not fail the step through $LASTEXITCODE.
