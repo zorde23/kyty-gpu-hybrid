@@ -578,6 +578,16 @@ void EmitSetAttribute(ValueEmitContext& ctx, const IR::Inst& inst) {
 				state.builder.AddFunction(spv::OpBitcast, TypeF32(state), f32, raw);
 				state.builder.AddFunction(spv::OpStore, state.depth_variable, f32);
 			}
+			if ((exp.en & 2u) != 0u && state.stencil_ref_variable != 0) {
+				const auto raw   = ExportRawComponent(ctx, data, 1);
+				const auto shift = state.input_info.pixel->ps_stencil_export == 2u ? 8u : 0u;
+				const auto bits  = state.builder.AllocateId();
+				const auto value = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpBitFieldUExtract, TypeU32(state), bits, raw,
+				                          ConstantU32(state, shift), ConstantU32(state, 8));
+				state.builder.AddFunction(spv::OpBitcast, TypeI32(state), value, bits);
+				state.builder.AddFunction(spv::OpStore, state.stencil_ref_variable, value);
+			}
 			if ((exp.en & 4u) != 0u && state.sample_mask_variable != 0) {
 				const auto raw     = ExportRawComponent(ctx, data, 2);
 				const auto value   = state.builder.AllocateId();

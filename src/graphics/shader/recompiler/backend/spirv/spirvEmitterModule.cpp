@@ -731,6 +731,10 @@ void DefineOutputs(EmitterState& state) {
 				    BuiltIn(state.sample_mask_variable, SampleMaskArrayType(state), "gl_SampleMask",
 				            spv::BuiltInSampleMask);
 				break;
+			case IR::StageOutputKind::StencilRef:
+				binding.variable_id = BuiltIn(state.stencil_ref_variable, TypeI32(state),
+				                              "gl_FragStencilRefARB", spv::BuiltInFragStencilRefEXT);
+				break;
 			case IR::StageOutputKind::ObjectPrimitiveId:
 				binding.variable_id = DefineInterfaceVariable(
 				    state, TypeU32(state), spv::StorageClassOutput, binding.debug_name.c_str());
@@ -844,6 +848,10 @@ void DefineModule(EmitterState& state) {
 		state.builder.RequireVersion(0x00010500u);
 		state.builder.RequireCapability(spv::CapabilityShaderLayer);
 	}
+	if (state.stencil_ref_variable != 0) {
+		state.builder.RequireExtension("SPV_EXT_shader_stencil_export");
+		state.builder.RequireCapability(spv::CapabilityStencilExportEXT);
+	}
 	if (state.viewport_index_variable != 0) {
 		state.builder.RequireVersion(0x00010500u);
 		state.builder.RequireCapability(spv::CapabilityShaderViewportIndex);
@@ -944,9 +952,13 @@ void DefineModule(EmitterState& state) {
 		if (state.depth_variable != 0) {
 			state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeDepthReplacing);
 		}
+		if (state.stencil_ref_variable != 0) {
+			state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeStencilRefReplacingEXT);
+		}
 		if (state.input_info.pixel->ps_early_z && !state.input_info.pixel->ps_pixel_kill_enable &&
 		    !state.input_info.pixel->ps_depth_export_enable &&
-		    !state.input_info.pixel->ps_sample_mask_export_enable) {
+		    !state.input_info.pixel->ps_sample_mask_export_enable &&
+		    state.stencil_ref_variable == 0) {
 			state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeEarlyFragmentTests);
 		}
 	}

@@ -22,6 +22,7 @@
 #include <atomic>
 #include <bit>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
@@ -444,11 +445,24 @@ static void ShaderGetStaticInputInfoPS(
 	ps_info.ps_pixel_kill_enable         = sh.db_shader_control.shader_kill_enable;
 	ps_info.ps_depth_export_enable       = sh.db_shader_control.shader_z_export_enable;
 	ps_info.ps_sample_mask_export_enable = sh.db_shader_control.shader_mask_export_enable;
+	// shortcut: Vulkan has one stencil reference, so with both exports on only the test value
+	// goes out; a pass that needs a different replace value would still be wrong.
+	// KYTY_STENCIL_EXPORT=0 drops the export, as before it was emitted.
+	static const bool stencil_export = [] {
+		const char* value = std::getenv("KYTY_STENCIL_EXPORT");
+		return value == nullptr || std::strcmp(value, "0") != 0;
+	}();
+	ps_info.ps_stencil_export =
+	    !stencil_export                                            ? 0u
+	    : sh.db_shader_control.shader_stencil_test_val_export_enable ? 1u
+	    : sh.db_shader_control.shader_stencil_op_val_export_enable ? 2u
+	                                                                : 0u;
 	// Alpha-to-mask coverage must gate depth writes, so it rules out early fragment tests.
 	ps_info.ps_early_z =
 	    (sh.db_shader_control.shader_z_behavior == 1 && !sh.db_shader_control.shader_kill_enable &&
 	     !sh.db_shader_control.shader_z_export_enable &&
-	     !sh.db_shader_control.shader_mask_export_enable && !sh.AlphaToMask());
+	     !sh.db_shader_control.shader_mask_export_enable && ps_info.ps_stencil_export == 0 &&
+	     !sh.AlphaToMask());
 
 	for (uint32_t i = 0; i < ps_info.input_num; i++) {
 		ps_info.interpolator_settings[i] = sh.ps_interpolator_settings[i];
@@ -592,6 +606,7 @@ void BuildStageStaticKey(const ShaderPixelInputInfo& info, std::vector<uint32_t>
 	words.push_back(static_cast<uint32_t>(info.ps_pixel_kill_enable));
 	words.push_back(static_cast<uint32_t>(info.ps_depth_export_enable));
 	words.push_back(static_cast<uint32_t>(info.ps_sample_mask_export_enable));
+	words.push_back(info.ps_stencil_export);
 	words.push_back(static_cast<uint32_t>(info.ps_early_z));
 	words.push_back(static_cast<uint32_t>(info.dual_source_blending));
 	words.push_back(static_cast<uint32_t>(info.object_primitive_id));

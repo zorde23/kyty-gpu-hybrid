@@ -293,6 +293,7 @@ enum class StageOutputKind {
 	ObjectPrimitiveId,
 	Depth,
 	SampleMask,
+	StencilRef,
 	PointSize,
 	ClipDistance,
 	CullDistance,

@@ -1820,6 +1820,10 @@ static constexpr auto MakeContextIndirectTable() {
 		    KYTY_PM4_GET(value, DB_SHADER_CONTROL, KILL_ENABLE) != 0;
 		db_shader_control.shader_z_export_enable =
 		    KYTY_PM4_GET(value, DB_SHADER_CONTROL, Z_EXPORT_ENABLE) != 0;
+		db_shader_control.shader_stencil_test_val_export_enable =
+		    KYTY_PM4_GET(value, DB_SHADER_CONTROL, STENCIL_TEST_VAL_EXPORT_ENABLE) != 0;
+		db_shader_control.shader_stencil_op_val_export_enable =
+		    KYTY_PM4_GET(value, DB_SHADER_CONTROL, STENCIL_OP_VAL_EXPORT_ENABLE) != 0;
 		db_shader_control.shader_mask_export_enable =
 		    KYTY_PM4_GET(value, DB_SHADER_CONTROL, MASK_EXPORT_ENABLE) != 0;
 		db_shader_control.shader_dual_export_enable =

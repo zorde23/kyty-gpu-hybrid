@@ -223,6 +223,8 @@ struct ShaderPixelInputInfo {
 	bool                                           ps_pixel_kill_enable         = false;
 	bool                                           ps_depth_export_enable       = false;
 	bool                                           ps_sample_mask_export_enable = false;
+	// MRTZ.y stencil export: 0 none, 1 test value (bits 7:0), 2 op value only (bits 15:8).
+	uint32_t                                       ps_stencil_export            = 0;
 	bool                                           ps_sample_shading            = false;
 	bool                                           dual_source_blending         = false;
 	bool                                           object_primitive_id          = false;

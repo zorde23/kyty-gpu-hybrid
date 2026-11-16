@@ -510,7 +510,7 @@ void VisitPixelInput(V& v, ShaderPixelInputInfo& info, const ShaderPixelInputInf
 	       target_round_mode, scratch_size_dwords, lds_size_dwords, ps_pos_x, ps_pos_y, ps_pos_z,
 	       ps_pos_w, ps_front_face, ps_front_face_all_bits, ps_ancillary, ps_no_perspective,
 	       parameter_mode, ps_pixel_kill_enable, ps_depth_export_enable,
-	       ps_sample_mask_export_enable, ps_sample_shading, dual_source_blending,
+	       ps_sample_mask_export_enable, ps_stencil_export, ps_sample_shading, dual_source_blending,
 	       object_primitive_id, alpha_blend_source, ps_early_z, stage] = info;
 	v.Dec("wave", wave_size, base.wave_size);
 	v.Dec("scratch", scratch_size_dwords, base.scratch_size_dwords);
@@ -538,6 +538,7 @@ void VisitPixelInput(V& v, ShaderPixelInputInfo& info, const ShaderPixelInputInf
 	v.Flag("kill", ps_pixel_kill_enable, base.ps_pixel_kill_enable);
 	v.Flag("zexp", ps_depth_export_enable, base.ps_depth_export_enable);
 	v.Flag("mexp", ps_sample_mask_export_enable, base.ps_sample_mask_export_enable);
+	v.Dec("sexp", ps_stencil_export, base.ps_stencil_export);
 	v.Flag("sshade", ps_sample_shading, base.ps_sample_shading);
 	v.Flag("dual", dual_source_blending, base.dual_source_blending);
 	v.Flag("primid", object_primitive_id, base.object_primitive_id);

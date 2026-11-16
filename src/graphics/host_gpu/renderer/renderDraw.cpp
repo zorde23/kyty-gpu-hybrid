@@ -1558,7 +1558,8 @@ bool RenderExecutor::CopyDepthToColor(CommandBuffer& buffer, const DrawCallInfo&
 	    depth.desc.view_info.layer_count != 1 || color.desc.view_info.layer_count != 1 ||
 	    hw.GetBlendControl(0).enable || state.ps_input_info.ps_pixel_kill_enable ||
 	    state.ps_input_info.ps_depth_export_enable ||
-	    state.ps_input_info.ps_sample_mask_export_enable);
+	    state.ps_input_info.ps_sample_mask_export_enable ||
+	    state.ps_input_info.ps_stencil_export != 0);
 	vk::ImageAspectFlags feedback;
 	const auto rendering = AcquireRenderTargets(buffer, &color, 1, depth, feedback);
 	if (depth.load_clear_aspects) {

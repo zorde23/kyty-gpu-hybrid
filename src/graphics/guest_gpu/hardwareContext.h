@@ -331,6 +331,8 @@ struct DepthShaderControl {
 	uint8_t shader_z_behavior         = 0;
 	bool    shader_kill_enable        = false;
 	bool    shader_z_export_enable    = false;
+	bool    shader_stencil_test_val_export_enable = false;
+	bool    shader_stencil_op_val_export_enable   = false;
 	bool    shader_mask_export_enable = false;
 	bool    shader_dual_export_enable = false;
 	bool    shader_execute_on_noop    = false;

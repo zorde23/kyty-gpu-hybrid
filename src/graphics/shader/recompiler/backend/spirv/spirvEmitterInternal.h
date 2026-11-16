@@ -238,6 +238,7 @@ struct EmitterState {
 	uint32_t                   depth_variable                        = 0;
 	uint32_t                   object_primitive_id_variable          = 0;
 	uint32_t                   sample_mask_variable                  = 0;
+	uint32_t                   stencil_ref_variable                  = 0;
 	std::vector<InputBinding>  inputs;
 	std::vector<OutputBinding> outputs;
 	std::vector<uint32_t>      interface_variables;

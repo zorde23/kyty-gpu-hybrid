@@ -414,6 +414,8 @@ static vk::Device VulkanCreateDevice(GraphicContext&          graphics,
 	graphics.buffer_marker_amd_enabled =
 	    std::getenv("KYTY_GPU_BREADCRUMBS") != nullptr && add(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
 	add(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
+	// Pixel shaders that export MRTZ.y stencil (material masks) need FragStencilRefEXT.
+	add(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
 	const bool extended_dynamic_state = add(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
 	if (!add(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME)) {
 		supported.unlink<vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR>();
