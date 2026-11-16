@@ -112,6 +112,11 @@ public:
 		}
 	}
 
+	// The written registers as three lists (context, SH, uconfig) of offset << 32 | value, and
+	// their replay through the SET_*_REG handlers; false for a malformed record.
+	void AppendRegisterWrites(std::vector<uint64_t>& words) const;
+	bool ApplyRegisterWrites(const uint64_t*& words, const uint64_t* end, uint64_t& applied, uint64_t& refused);
+
 	void SetIndexType(uint32_t index_type_and_size);
 	void SetIndexBaseAddress(uint64_t index_base_addr);
 	void SetIndexBufferSize(uint32_t index_buffer_size);

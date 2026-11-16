@@ -339,6 +339,33 @@ static size_t DifferentBytes(const State& live, const uint64_t*& words, const ui
 	return different;
 }
 
+void CommandProcessor::AppendRegisterWrites(std::vector<uint64_t>& words) const {
+	for (uint32_t register_class = 0; register_class < RegisterClassCount; register_class++) {
+		const auto count_at = words.size();
+		words.push_back(0);
+		ForEachWrittenRegister(static_cast<RegisterClass>(register_class), [&](uint32_t offset, uint32_t value) {
+			words.push_back(static_cast<uint64_t>(offset) << 32u | value);
+		});
+		words[count_at] = words.size() - count_at - 1;
+	}
+}
+
+bool CommandProcessor::ApplyRegisterWrites(const uint64_t*& words, const uint64_t* end, uint64_t& applied,
+                                           uint64_t& refused) {
+	for (uint32_t register_class = 0; register_class < RegisterClassCount; register_class++) {
+		if (words >= end || *words > static_cast<uint64_t>(end - words - 1)) {
+			return false;
+		}
+		const auto count = *words++;
+		for (uint64_t i = 0; i < count; i++, words++) {
+			const auto ok = ApplyCapturedRegister(*this, register_class, static_cast<uint32_t>(*words >> 32u),
+			                                      static_cast<uint32_t>(*words));
+			(ok ? applied : refused)++;
+		}
+	}
+	return true;
+}
+
 void GuestGpu::CaptureRegisters(std::vector<uint64_t>& words) {
 	words.push_back(RegisterCaptureMagic);
 	for (uint32_t queue = 0; queue < QueueCount; queue++) {
@@ -347,15 +374,7 @@ void GuestGpu::CaptureRegisters(std::vector<uint64_t>& words) {
 			continue;
 		}
 		words.push_back(queue);
-		for (uint32_t register_class = 0; register_class < CommandProcessor::RegisterClassCount; register_class++) {
-			const auto count_at = words.size();
-			words.push_back(0);
-			processor->ForEachWrittenRegister(static_cast<CommandProcessor::RegisterClass>(register_class),
-			                                  [&](uint32_t offset, uint32_t value) {
-				                                  words.push_back(static_cast<uint64_t>(offset) << 32u | value);
-			                                  });
-			words[count_at] = words.size() - count_at - 1;
-		}
+		processor->AppendRegisterWrites(words);
 		// The decoded state too, only to check the rebuilt one in a DLL with the same layout.
 		words.push_back(sizeof(HW::Context));
 		AppendWords(words, processor->GetCtx());
@@ -383,16 +402,8 @@ bool GuestGpu::RestoreRegisters(const uint64_t* words, const uint64_t* end) {
 		processor.Reset();
 		uint64_t applied = 0;
 		uint64_t refused = 0;
-		for (uint32_t register_class = 0; register_class < CommandProcessor::RegisterClassCount; register_class++) {
-			if (words >= end || *words > static_cast<uint64_t>(end - words - 1)) {
-				return false;
-			}
-			const auto count = *words++;
-			for (uint64_t i = 0; i < count; i++, words++) {
-				const auto ok = ApplyCapturedRegister(processor, register_class, static_cast<uint32_t>(*words >> 32u),
-				                                      static_cast<uint32_t>(*words));
-				(ok ? applied : refused)++;
-			}
+		if (!processor.ApplyRegisterWrites(words, end, applied, refused)) {
+			return false;
 		}
 		const auto ctx  = DifferentBytes(processor.GetCtx(), words, end);
 		const auto ucfg = DifferentBytes(processor.GetUcfg(), words, end);
