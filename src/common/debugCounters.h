@@ -59,7 +59,10 @@ enum class Counter {
 	StageCpPushTicks,
 	StageResolveTicks,
 	StageResolvePushTicks,
+	StageResolveVsTicks, // Parts of StageResolveTicks: preparing the vertex and the pixel program.
+	StageResolvePsTicks,
 	StageExecuteTicks,
+	StageExecuteFlipWaitTicks, // Part of StageExecuteTicks: the guest's wait for a pending flip of a buffer.
 	StageRecordTicks,
 	Count
 };

@@ -1349,6 +1349,10 @@ bool PipelineCache::ResolveGraphicsPrograms(const HW::Context&    context,
 			stage.tess = tess;
 		}
 	} else {
+		std::optional<Common::DebugCounters::StageTimer> work;
+		if (ahead != nullptr) {
+			work.emplace(Common::DebugCounters::Counter::StageResolveVsTicks);
+		}
 		vertex_params[0] = PrepareProgram(vertex_regs, context, user_config, vertex_info[0]);
 	}
 	if (ahead != nullptr && ahead->reads.Failed()) {
@@ -1418,7 +1422,13 @@ bool PipelineCache::ResolveGraphicsPrograms(const HW::Context&    context,
 				        .export_mapping;
 			}
 		}
-		pixel_params      = PrepareProgram(pixel_regs, sh, target_export_mapping, pixel_info);
+		{
+			std::optional<Common::DebugCounters::StageTimer> work;
+			if (ahead != nullptr) {
+				work.emplace(Common::DebugCounters::Counter::StageResolvePsTicks);
+			}
+			pixel_params = PrepareProgram(pixel_regs, sh, target_export_mapping, pixel_info);
+		}
 		pixel_info.object_primitive_id = object_primitive_id;
 		for (uint32_t export_index = 0; export_index < 8u; export_index++) {
 			const auto slot = ShaderPixelExportTarget(pixel_info.target_shader_mask, export_index);

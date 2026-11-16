@@ -2294,6 +2294,7 @@ void CommandProcessor::WaitFlipDone(uint32_t video_out_handle, uint32_t display_
 	// is pending (upstream's wait, without the displayed-buffer condition it reverted).
 	EmitCallback([this, video_out_handle, display_buffer_index] {
 		GetScheduler().Flush();
+		Common::DebugCounters::StageTimer wait(Common::DebugCounters::Counter::StageExecuteFlipWaitTicks);
 		m_renderer.GetVideoOut().WaitFlipDone(static_cast<int>(video_out_handle),
 		                                      static_cast<int>(display_buffer_index));
 	});
