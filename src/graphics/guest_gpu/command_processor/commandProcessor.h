@@ -10,6 +10,7 @@
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <optional>
@@ -86,6 +87,29 @@ public:
 	HW::Shader& GetShCtx() {
 		m_sh_ctx_dirty = true;
 		return m_sh_ctx;
+	}
+
+	// The value the guest last wrote to each register, for frame captures: replaying these writes
+	// rebuilds the state above in any build of the DLL (see GuestGpu::CaptureRegisters()).
+	enum class RegisterClass : uint32_t { Context, Shader, UserConfig };
+	static constexpr uint32_t RegisterClassCount = 3;
+	void NoteRegister(RegisterClass register_class, uint32_t offset, uint32_t value) {
+		auto& file = m_registers[static_cast<uint32_t>(register_class)];
+		if (offset >= file.values.size()) {
+			file.values.resize(offset + 1u);
+			file.written.resize(offset + 1u);
+		}
+		file.values[offset]  = value;
+		file.written[offset] = 1;
+	}
+	template <typename Func>
+	void ForEachWrittenRegister(RegisterClass register_class, Func&& func) const {
+		const auto& file = m_registers[static_cast<uint32_t>(register_class)];
+		for (uint32_t offset = 0; offset < file.values.size(); offset++) {
+			if (file.written[offset] != 0) {
+				func(offset, file.values[offset]);
+			}
+		}
 	}
 
 	void SetIndexType(uint32_t index_type_and_size);
@@ -235,6 +259,12 @@ private:
 	// Command processor state, written by the command processor thread.
 	alignas(64) HW::Context m_ctx;
 	std::optional<HW::Context> m_saved_ctx;
+	struct RegisterFile {
+		std::vector<uint32_t> values;
+		std::vector<uint8_t>  written;
+	};
+	std::array<RegisterFile, RegisterClassCount> m_registers;
+	std::optional<RegisterFile>                  m_saved_ctx_registers;
 	HW::UserConfig m_ucfg;
 	HW::Shader     m_sh_ctx;
 	uint32_t       m_index_type_and_size              = 0;

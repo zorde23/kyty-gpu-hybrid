@@ -74,6 +74,11 @@ uint32_t CpOpWaitRegMem64(CommandProcessor&, uint32_t, const uint32_t*, uint32_t
 uint32_t CpOpFlip(CommandProcessor&, uint32_t, const uint32_t*, uint32_t, uint32_t);
 uint32_t CpOpPssr(CommandProcessor&, uint32_t, const uint32_t*, uint32_t, uint32_t);
 
+// Writes one register of a frame capture through the handler a SET_*_REG packet would use.
+// register_class is a CommandProcessor::RegisterClass; false for a register no handler takes.
+bool ApplyCapturedRegister(CommandProcessor& cp, uint32_t register_class, uint32_t offset,
+                           uint32_t value);
+
 } // namespace Libs::Graphics
 
 #endif // GRAPHICS_GUEST_GPU_COMMAND_PROCESSOR_PM4_DISPATCH_H

@@ -1019,6 +1019,7 @@ KYTY_CP_OP_PARSER(CpOpIndirectCxRegs) {
 			EXIT("unknown cx reg at %05" PRIx32 ": 0x%" PRIx32 "\n", num_dw - dw, cmd_offset);
 		}
 
+		cp.NoteRegister(CommandProcessor::RegisterClass::Context, cmd_offset, value);
 		pfunc(cp, cmd_offset, value);
 	}
 
@@ -1072,6 +1073,7 @@ KYTY_CP_OP_PARSER(CpOpIndirectShRegs) {
 			EXIT("unknown sh reg at %05" PRIx32 ": 0x%" PRIx32 "\n", num_dw - dw, cmd_offset);
 		}
 
+		cp.NoteRegister(CommandProcessor::RegisterClass::Shader, cmd_offset, value);
 		pfunc(cp, cmd_offset, value);
 	}
 
@@ -1118,6 +1120,7 @@ KYTY_CP_OP_PARSER(CpOpIndirectUcRegs) {
 			}
 			EXIT("unknown uc reg at %05" PRIx32 ": 0x%" PRIx32 "\n", num_dw - dw, cmd_offset);
 		}
+		cp.NoteRegister(CommandProcessor::RegisterClass::UserConfig, cmd_offset, value);
 		pfunc(cp, cmd_offset, value);
 	}
 
@@ -1206,8 +1209,9 @@ KYTY_CP_OP_PARSER(CpOpMemSemaphore) {
 
 // Writes each value of a SET_*_REG packet to the next register, as the hardware does.
 template <typename Table>
-static uint32_t SetRegisters(CommandProcessor& cp, const Table& table, uint32_t cmd_id,
-                             uint32_t cmd_offset, const uint32_t* values, uint32_t position) {
+static uint32_t SetRegisters(CommandProcessor& cp, CommandProcessor::RegisterClass register_class,
+                             const Table& table, uint32_t cmd_id, uint32_t cmd_offset,
+                             const uint32_t* values, uint32_t position) {
 	const auto num_values = KYTY_PM4_LEN(cmd_id) - 2u;
 	for (uint32_t i = 0; i < num_values; i++) {
 		const auto offset = cmd_offset + i;
@@ -1216,6 +1220,7 @@ static uint32_t SetRegisters(CommandProcessor& cp, const Table& table, uint32_t 
 			     "\n\tcmd_offset = %08" PRIx32 "\n",
 			     position, cmd_id, offset);
 		}
+		cp.NoteRegister(register_class, offset, values[i]);
 		table[offset](cp, offset, values[i]);
 	}
 	return num_values + 1u;
@@ -1230,7 +1235,7 @@ KYTY_CP_OP_PARSER(CpOpSetContextReg) {
 		return 2;
 	}
 
-	return SetRegisters(cp, g_hw_ctx_indirect_func, cmd_id, cmd_offset, buffer + 1, num_dw - dw);
+	return SetRegisters(cp, CommandProcessor::RegisterClass::Context, g_hw_ctx_indirect_func, cmd_id, cmd_offset, buffer + 1, num_dw - dw);
 }
 
 KYTY_CP_OP_PARSER(CpOpSetShaderReg) {
@@ -1246,11 +1251,14 @@ KYTY_CP_OP_PARSER(CpOpSetShaderReg) {
 	auto pfunc = g_hw_sh_func[cmd_offset];
 
 	if (pfunc == nullptr) {
-		return SetRegisters(cp, g_hw_sh_indirect_func, cmd_id, cmd_offset, buffer + 1, num_dw - dw);
+		return SetRegisters(cp, CommandProcessor::RegisterClass::Shader, g_hw_sh_indirect_func, cmd_id, cmd_offset, buffer + 1, num_dw - dw);
 	}
 
 	auto s = pfunc(cp, cmd_id, cmd_offset, buffer + 1, dw);
 	EXIT_IF(s == 0);
+	for (uint32_t i = 0; i < s; i++) {
+		cp.NoteRegister(CommandProcessor::RegisterClass::Shader, cmd_offset + i, buffer[1 + i]);
+	}
 	return s + 1;
 }
 
@@ -1272,7 +1280,7 @@ KYTY_CP_OP_PARSER(CpOpSetUconfigReg) {
 		return KYTY_PM4_LEN(cmd_id) - 1u;
 	}
 
-	return SetRegisters(cp, g_hw_uc_indirect_func, cmd_id, cmd_offset, buffer + 1, num_dw - dw);
+	return SetRegisters(cp, CommandProcessor::RegisterClass::UserConfig, g_hw_uc_indirect_func, cmd_id, cmd_offset, buffer + 1, num_dw - dw);
 }
 
 KYTY_CP_OP_PARSER(CpOpWaitFlipDone) {
@@ -2407,5 +2415,29 @@ constinit const std::array<hw_reg_func_t, Pm4::SH_NUM> g_hw_sh_indirect_func =
     MakeShaderIndirectTable();
 constinit const std::array<hw_reg_func_t, Pm4::UC_NUM> g_hw_uc_indirect_func =
     MakeUconfigIndirectTable();
+
+bool ApplyCapturedRegister(CommandProcessor& cp, uint32_t register_class_value, uint32_t offset,
+                           uint32_t value) {
+	using Class               = CommandProcessor::RegisterClass;
+	const auto register_class = static_cast<Class>(register_class_value);
+	hw_reg_func_t func = nullptr;
+	if (register_class == Class::Context && offset < Pm4::CX_NUM) {
+		func = g_hw_ctx_indirect_func[offset];
+	} else if (register_class == Class::UserConfig && offset < Pm4::UC_NUM) {
+		func = g_hw_uc_indirect_func[offset];
+	} else if (register_class == Class::Shader && offset < Pm4::SH_NUM) {
+		if (auto parser = g_hw_sh_func[offset]; parser != nullptr) {
+			cp.NoteRegister(register_class, offset, value);
+			return parser(cp, 1u << 16u, offset, &value, 0) == 1u;
+		}
+		func = g_hw_sh_indirect_func[offset];
+	}
+	if (func == nullptr) {
+		return false;
+	}
+	cp.NoteRegister(register_class, offset, value);
+	func(cp, offset, value);
+	return true;
+}
 
 } // namespace Libs::Graphics

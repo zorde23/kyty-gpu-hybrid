@@ -33,6 +33,7 @@
 #include <atomic>
 #include <chrono>
 #include <optional>
+#include <cstdint>
 #include <cstdio>
 #include <deque>
 #include <memory>
@@ -42,6 +43,7 @@
 #include <utility>
 #include <type_traits>
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -308,30 +310,101 @@ bool TakeWords(const uint64_t*& words, const uint64_t* end, State& state) {
 
 } // namespace
 
+// Version 2 of the captured CP state: the registers the guest wrote, replayed through their
+// handlers, so a capture outlives changes to the decoded state. Version 1 (no magic) copied the
+// decoded structures and only opens in the DLL that wrote it.
+static constexpr uint64_t RegisterCaptureMagic = 0x4b59524547530002ull;
+
+template <typename State>
+static size_t DifferentBytes(const State& live, const uint64_t*& words, const uint64_t* end) {
+	if (words >= end) {
+		return SIZE_MAX;
+	}
+	const auto size  = *words++;
+	const auto count = (size + 7) / 8;
+	if (static_cast<uint64_t>(end - words) < count) {
+		words = end;
+		return SIZE_MAX;
+	}
+	const auto* bytes = reinterpret_cast<const uint8_t*>(words);
+	words += count;
+	if (size != sizeof(State)) {
+		return SIZE_MAX;
+	}
+	const auto* mine = reinterpret_cast<const uint8_t*>(&live);
+	size_t different = 0;
+	for (size_t i = 0; i < sizeof(State); i++) {
+		different += mine[i] != bytes[i] ? 1u : 0u;
+	}
+	return different;
+}
+
 void GuestGpu::CaptureRegisters(std::vector<uint64_t>& words) {
+	words.push_back(RegisterCaptureMagic);
 	for (uint32_t queue = 0; queue < QueueCount; queue++) {
 		auto* processor = queue == 0 ? m_gfx_cp.get() : m_compute_cp[queue - 1].get();
 		if (processor == nullptr) {
 			continue;
 		}
 		words.push_back(queue);
+		for (uint32_t register_class = 0; register_class < CommandProcessor::RegisterClassCount; register_class++) {
+			const auto count_at = words.size();
+			words.push_back(0);
+			processor->ForEachWrittenRegister(static_cast<CommandProcessor::RegisterClass>(register_class),
+			                                  [&](uint32_t offset, uint32_t value) {
+				                                  words.push_back(static_cast<uint64_t>(offset) << 32u | value);
+			                                  });
+			words[count_at] = words.size() - count_at - 1;
+		}
+		// The decoded state too, only to check the rebuilt one in a DLL with the same layout.
+		words.push_back(sizeof(HW::Context));
 		AppendWords(words, processor->GetCtx());
+		words.push_back(sizeof(HW::UserConfig));
 		AppendWords(words, processor->GetUcfg());
+		words.push_back(sizeof(HW::Shader));
 		AppendWords(words, processor->GetShCtx());
 	}
 }
 
 bool GuestGpu::RestoreRegisters(const uint64_t* words, const uint64_t* end) {
+	if (words >= end || *words != RegisterCaptureMagic) {
+		std::fputs("[kyty-gpu] restore: the capture keeps the CP state in the old layout-bound form; "
+		           "only the DLL that recorded it opens it\n",
+		           stderr);
+		return false;
+	}
+	words++;
 	while (words < end) {
 		const auto queue = static_cast<uint32_t>(*words++);
 		if (queue >= QueueCount) {
 			return false;
 		}
 		auto& processor = GetProcessor(queue);
-		if (!TakeWords(words, end, processor.GetCtx()) || !TakeWords(words, end, processor.GetUcfg()) ||
-		    !TakeWords(words, end, processor.GetShCtx())) {
-			return false;
+		processor.Reset();
+		uint64_t applied = 0;
+		uint64_t refused = 0;
+		for (uint32_t register_class = 0; register_class < CommandProcessor::RegisterClassCount; register_class++) {
+			if (words >= end || *words > static_cast<uint64_t>(end - words - 1)) {
+				return false;
+			}
+			const auto count = *words++;
+			for (uint64_t i = 0; i < count; i++, words++) {
+				const auto ok = ApplyCapturedRegister(processor, register_class, static_cast<uint32_t>(*words >> 32u),
+				                                      static_cast<uint32_t>(*words));
+				(ok ? applied : refused)++;
+			}
 		}
+		const auto ctx  = DifferentBytes(processor.GetCtx(), words, end);
+		const auto ucfg = DifferentBytes(processor.GetUcfg(), words, end);
+		const auto sh   = DifferentBytes(processor.GetShCtx(), words, end);
+		const auto show = [](size_t different) {
+			return different == SIZE_MAX ? std::string("other layout") : std::to_string(different) + " bytes differ";
+		};
+		std::fprintf(stderr,
+		             "[kyty-gpu] restore: queue %u: %llu registers written, %llu without a handler; against the "
+		             "recorded state: context %s, user config %s, shaders %s\n",
+		             queue, static_cast<unsigned long long>(applied), static_cast<unsigned long long>(refused),
+		             show(ctx).c_str(), show(ucfg).c_str(), show(sh).c_str());
 	}
 	return true;
 }
@@ -531,6 +604,8 @@ void CommandProcessor::Reset() {
 	m_ucfg_dirty   = true;
 	m_sh_ctx_dirty = true;
 	m_saved_ctx.reset();
+	m_registers = {};
+	m_saved_ctx_registers.reset();
 	m_index_type_and_size              = 0;
 	m_index_buffer_size                = 0;
 	m_index_base_addr                  = 0;
@@ -543,21 +618,30 @@ void CommandProcessor::Reset() {
 
 void CommandProcessor::ApplyContextStateOperation(ContextStateOperation operation) {
 	m_ctx_dirty = true;
+	auto& registers = m_registers[static_cast<uint32_t>(RegisterClass::Context)];
 	switch (operation) {
-		case ContextStateOperation::Clear: m_ctx.Reset(); break;
+		case ContextStateOperation::Clear:
+			m_ctx.Reset();
+			registers = {};
+			break;
 		case ContextStateOperation::Push:
 			EXIT_IF(m_saved_ctx.has_value());
 			m_saved_ctx.emplace(m_ctx);
+			m_saved_ctx_registers.emplace(registers);
 			break;
 		case ContextStateOperation::Pop:
 			EXIT_IF(!m_saved_ctx.has_value());
 			m_ctx = *m_saved_ctx;
 			m_saved_ctx.reset();
+			registers = m_saved_ctx_registers.has_value() ? std::move(*m_saved_ctx_registers) : RegisterFile {};
+			m_saved_ctx_registers.reset();
 			break;
 		case ContextStateOperation::PushClear:
 			EXIT_IF(m_saved_ctx.has_value());
 			m_saved_ctx.emplace(m_ctx);
 			m_ctx.Reset();
+			m_saved_ctx_registers.emplace(std::move(registers));
+			registers = {};
 			break;
 	}
 }
