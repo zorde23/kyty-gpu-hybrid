@@ -809,10 +809,10 @@ void FrameStatsRecord(Clock::time_point now, const CounterTotals& totals) {
 		};
 		Log::WriteToConsoleAndLog(fmt::format(
 		    "[kyty-stages] per frame, working (not waiting for input): cp {:.2f} ms (of it blocked pushing {:.2f}), "
-		    "resolve {:.2f} ms (vertex program {:.2f}, pixel program {:.2f}; blocked pushing {:.2f}), execute {:.2f} ms (of it waiting for a flip {:.2f}), record {:.2f} ms (with submits)\n",
+		    "resolve {:.2f} ms (vertex program {:.2f}, pixel program {:.2f}; blocked pushing {:.2f}), execute {:.2f} ms (of it waiting for a flip {:.2f}), record {:.2f} ms (with submits); draws binding another pipeline {:.0f}, keeping the previous targets {:.0f}\n",
 		    per_frame_ms(Counter::GpuThreadBusyNs), stage_ms(Counter::StageCpPushTicks),
 		    stage_ms(Counter::StageResolveTicks), stage_ms(Counter::StageResolveVsTicks), stage_ms(Counter::StageResolvePsTicks), stage_ms(Counter::StageResolvePushTicks),
-		    stage_ms(Counter::StageExecuteTicks), stage_ms(Counter::StageExecuteFlipWaitTicks), stage_ms(Counter::StageRecordTicks)));
+		    stage_ms(Counter::StageExecuteTicks), stage_ms(Counter::StageExecuteFlipWaitTicks), stage_ms(Counter::StageRecordTicks), per_frame(Counter::StageDrawPipelineSwitches), per_frame(Counter::StageDrawTargetsReused)));
 		w.tsc = tsc;
 	}
 	w.start = now;

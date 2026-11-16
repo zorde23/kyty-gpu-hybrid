@@ -1831,6 +1831,16 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 		ShaderWriteHazardBarrier(vk_buffer, shader_write_stages);
 	}
 	buffer.BeginRendering(rendering);
+	if (Common::DebugCounters::StageTimesEnabled()) {
+		static vk::Pipeline last_pipeline;
+		if (pipeline.pipeline != last_pipeline) {
+			Common::DebugCounters::Add(Common::DebugCounters::Counter::StageDrawPipelineSwitches);
+			last_pipeline = pipeline.pipeline;
+		}
+		if (m_render_targets_reused) {
+			Common::DebugCounters::Add(Common::DebugCounters::Counter::StageDrawTargetsReused);
+		}
+	}
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.pipeline);
 	if (mesh_task) {
 		vk_buffer.drawMeshTasksEXT(emit.indirect.count, 1, 1);

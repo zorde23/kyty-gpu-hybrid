@@ -64,6 +64,8 @@ enum class Counter {
 	StageExecuteTicks,
 	StageExecuteFlipWaitTicks, // Part of StageExecuteTicks: the guest's wait for a pending flip of a buffer.
 	StageRecordTicks,
+	StageDrawPipelineSwitches, // Draws that bind another graphics pipeline than the draw before.
+	StageDrawTargetsReused,    // Draws that kept the render targets of the draw before.
 	Count
 };
 
