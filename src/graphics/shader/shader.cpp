@@ -447,10 +447,11 @@ static void ShaderGetStaticInputInfoPS(
 	ps_info.ps_sample_mask_export_enable = sh.db_shader_control.shader_mask_export_enable;
 	// shortcut: Vulkan has one stencil reference, so with both exports on only the test value
 	// goes out; a pass that needs a different replace value would still be wrong.
-	// KYTY_STENCIL_EXPORT=0 drops the export, as before it was emitted.
+	// shortcut: off unless KYTY_STENCIL_EXPORT=1, until a capture with a stencil-exporting pixel
+	// shader shows it renders right; then make it the default.
 	static const bool stencil_export = [] {
 		const char* value = std::getenv("KYTY_STENCIL_EXPORT");
-		return value == nullptr || std::strcmp(value, "0") != 0;
+		return value != nullptr && std::strcmp(value, "1") == 0;
 	}();
 	ps_info.ps_stencil_export =
 	    !stencil_export                                            ? 0u
