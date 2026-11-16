@@ -481,7 +481,7 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 	// barriers). Without such an order since the previous direct dispatch of its queue, nothing
 	// was recorded after that one and its barrier is still deferred: the barrier before the
 	// earlier dispatch already ordered everything before it, so neither is needed and the two
-	// overlap. GTA V's ray tracing structure builds run hundreds of such dispatches per frame.
+	// overlap. The title's ray tracing structure builds run hundreds of such dispatches per frame.
 	const bool chained = std::exchange(m_dispatch_chained, false) && m_deferred_barrier;
 	if (has_storage_writes && !chained) {
 		// A host fence used to serialize every dispatch. Preserve its read-before-write ordering

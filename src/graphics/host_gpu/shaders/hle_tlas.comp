@@ -1,6 +1,6 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
-// HLE of GTA V's top-level BVH builds (the TLAS stage of its BVH compute queue, see
+// HLE of the title's top-level BVH builds (the TLAS stage of its BVH compute queue, see
 // CommandProcessor::HleTlasDispatch()): builds a TLAS in the game's format (header, box32 nodes,
 // 128-byte instance records) from the instance list the game's CPU writes (96-byte records), in
 // one workgroup, straight into guest memory through the BDA page table.

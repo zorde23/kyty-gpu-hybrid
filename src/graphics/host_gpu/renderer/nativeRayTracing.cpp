@@ -60,7 +60,7 @@ constexpr uint64_t EvictFrames      = 1800;
 constexpr uint64_t EvictScanPrepares = 8;
 constexpr uint32_t MaxEvictions     = 256;
 // The most triangles one slot holds (both geometries) and bytes its memory takes. The whole scene
-// of GTA V holds under two million triangles in about 200 MiB; a BLAS counted bigger was read
+// of the title holds under two million triangles in about 200 MiB; a BLAS counted bigger was read
 // while the guest was rewriting it (a count of tens of millions once reserved 8 GB of VRAM).
 constexpr uint64_t MaxSlotTriangles = uint64_t {1} << 21u;
 constexpr uint64_t MaxSlotBytes     = uint64_t {256} << 20u;
@@ -99,7 +99,7 @@ constexpr uint32_t ModeGather = 3;
 // Gathered builds of a slot before it walks the guest BVH again.
 constexpr uint32_t MaxGathers = 30;
 // The guest memory of a BLAS sce::Psr decompresses holds less than one triangle per this many
-// bytes (GTA V: 54 bytes or more per triangle, header and boxes included).
+// bytes (the title: 54 bytes or more per triangle, header and boxes included).
 constexpr uint64_t DecompressBytesPerTriangle = 32;
 
 // RtState (rt_common.inc).
@@ -1438,7 +1438,7 @@ void NativeRayTracing::Prepare(const CommandRecorder& command, uint64_t user_poi
 	    .table_mask        = TableEntries - 1,
 	    .prepare_id        = m_prepare_id,
 	    .verify            = 1u,
-	    // The facing of each instance follows the game's triangle test (the layout's flip bit: GTA
+	    // The facing of each instance follows the game's triangle test (the layout's flip bit: the title
 	    // V 01.011's accepts, with flags bit 3 clear, the triangles whose test sign is set, the
 	    // host's back faces; not flipping them culled the wrong face of every instance without both
 	    // faces, and single sided geometry such as peds, roofs and walls cast no shadow).

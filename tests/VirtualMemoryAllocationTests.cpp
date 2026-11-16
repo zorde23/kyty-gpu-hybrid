@@ -314,7 +314,7 @@ void TestWindowsGuestRedZoneStaticPatcher() {
 	}
 
 	// Frame-pointer leaves address the same red-zone slot through RBP: after "push rbp; mov rbp,
-	// rsp; push rbx", [rbp-0x20] is [rsp-0x18]. GTA San Andreas DE kept a TSet element pointer
+	// rsp; push rbx", [rbp-0x20] is [rsp-0x18]. a remastered title kept a TSet element pointer
 	// there across a faulting store. Exit through pops, "lea rsp, [rbp-8]" and "leave".
 	for (const int epilogue: {0, 1, 2}) {
 		Xbyak::CodeGenerator code(CODE_SIZE, reinterpret_cast<void*>(mapping));

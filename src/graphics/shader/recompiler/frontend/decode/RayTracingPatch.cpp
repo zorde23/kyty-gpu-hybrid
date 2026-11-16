@@ -911,7 +911,7 @@ private:
 		       LeafFacing(leaf, tail, header, back, site);
 	}
 
-	// ---- The alpha test of GTA V's leaf code (see RayTracingAlphaTest). ----
+	// ---- The alpha test of the title's leaf code (see RayTracingAlphaTest). ----
 	//
 	// The leaf code tests one entry of a leaf list; past its opaque check, the alpha test is
 	// straight-line code. It is recognized by the dataflow of the values it computes: each
@@ -1393,7 +1393,7 @@ private:
 		return false;
 	}
 
-	// ---- The alpha test of GTA V's closest hit leaf code (RayTracingAlphaLayout::Lane). ----
+	// ---- The alpha test of the title's closest hit leaf code (RayTracingAlphaLayout::Lane). ----
 	//
 	// The test of the packet sites (see DeriveAlphaTest) with vector loads in [begin, end): the
 	// material dwords m * 3 + k with BUFFER_LOAD_DWORD idxen, the V#s and the T# of the tables in

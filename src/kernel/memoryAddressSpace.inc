@@ -69,7 +69,7 @@ static void CopySparseRange(const Regions& regions, uint64_t vaddr, void* data, 
 // MAP_FIXED over an existing mapping (unmapped, then mapped again), and, on Windows, the parts of a
 // file view that stay mapped when part of it is unmapped (Windows splits a view only by unmapping
 // all of it). On the console these replacements are atomic, so guest threads keep using the
-// memory: GTA V's streamer decompresses into buffers whose 64 KiB pages are mapped again or
+// memory: the title's streamer decompresses into buffers whose 64 KiB pages are mapped again or
 // neighbour an unmap. A fault inside such a range waits until the mapping is back and is retried
 // instead of being reported as an access violation.
 struct TransientUnmapWindow {

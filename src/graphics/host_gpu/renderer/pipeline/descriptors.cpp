@@ -821,7 +821,7 @@ TextureBinding RenderExecutor::ResolveTexture(const ShaderRecompiler::IR::ImageR
 	                 ? texture_cache.FindImageSpeculative(desc, shader_conversion, &depth_source)
 	                 : texture_cache.FindImage(desc, shader_conversion);
 	if (!id && depth_source) {
-		// GTA V's ray hit shading (CS 0xc6c91cf1882cdc3b) compares against shadow maps the game
+		// The title's ray hit shading (CS 0xc6c91cf1882cdc3b) compares against shadow maps the game
 		// writes as R16 or R32 float colors: the table element samples a depth copy of the color
 		// image instead of converting the image other passes write.
 		id = texture_cache.FindDepthCopy(depth_source, desc.info);
@@ -1409,7 +1409,7 @@ bool RenderExecutor::ReuseTableBindings(const ShaderRecompiler::IR::CompiledShad
 	size_t                                      range_index = 0;
 	size_t                                      slot_index  = 0;
 	bool                                        same        = true;
-	// A few slots may name other T#s now (GTA V adds the textures it streams in to its bindless
+	// A few slots may name other T#s now (the title adds the textures it streams in to its bindless
 	// tables: null slots name them now): those slots are bound again, the rest is reused.
 	const size_t max_changes = std::max<size_t>(256, state.values.size() / 8);
 	m_table_changed_slots.clear();
@@ -1431,7 +1431,7 @@ bool RenderExecutor::ReuseTableBindings(const ShaderRecompiler::IR::CompiledShad
 		}
 		const auto& table = snapshot.image_tables.at(root.table);
 		// The same slots as when the values were recorded (the table's words did not change):
-		// nothing to compare. GTA V's tables hold ~16 000 T#s, compared on every binding.
+		// nothing to compare. The title's tables hold ~16 000 T#s, compared on every binding.
 		if (table.slots_id != 0 && table.slots_id == cached.slots_id) {
 			slot_index += root.table_capacity;
 			return;

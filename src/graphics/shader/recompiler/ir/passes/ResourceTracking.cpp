@@ -3312,7 +3312,7 @@ private:
 			plan.split_offsets |= !indexed && offset != table_offset;
 			table_handle = current_handle;
 			// A register the shader also uses for other data before or after the T# merges with it
-			// in Phis of those other lifetimes (GTA V's ray tracing any-hit shaders): the read stays
+			// in Phis of those other lifetimes (the title's ray tracing any-hit shaders): the read stays
 			// an ordinary scalar load for them and only its image uses take the table path.
 			const bool images_only =
 			    handle.GetOpcode() != ValueOpcode::GetImageResource || UsesOnlyImageDescriptors(*read);
@@ -3908,7 +3908,7 @@ private:
 			// heap indexed by a material word or by a bitfield of GPU-written material data: bind
 			// every T# of the table and let the shader map entry key & mask to its descriptor. This
 			// reads only the table, never the material data. The direct image-table lookup below
-			// would make each distinct T# its own specialized image instead: GTA V's ray tracing
+			// would make each distinct T# its own specialized image instead: the title's ray tracing
 			// heaps hold thousands of T#s (and words that only look like T#s), and a specialization
 			// with one image per material T# took the driver minutes to compile.
 			const auto* address = !plan.table_indexed && plan.reads[0] != nullptr

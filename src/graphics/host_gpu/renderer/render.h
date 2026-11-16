@@ -349,7 +349,7 @@ private:
 		}
 	}
 
-	// The bindless tables a program bound last. GTA V's ray tracing dispatches bind ~16k slots
+	// The bindless tables a program bound last. The title's ray tracing dispatches bind ~16k slots
 	// naming ~8k textures each, and almost all of them stay the same from frame to frame: while
 	// the T#s of every slot are unchanged, a binding of the program revisits only the elements
 	// that an image registration or a guest backing change may have affected, and the elements
@@ -411,7 +411,7 @@ private:
 		// What RebindReusedTables() last found an element unchanged with: the version of its
 		// image (TextureCache::ImageVersion()) and of its resolution (TableElementChanged()).
 		// While both hold and the operation does not bind the image itself, the element is still
-		// unchanged: the check reads neither the resolution nor the image (GTA V's ray tracing
+		// unchanged: the check reads neither the resolution nor the image (the title's ray tracing
 		// tables have ~16 000 elements, scattered in memory, and almost none change).
 		struct Checked {
 			static constexpr uint32_t None      = UINT32_MAX; // Check the element.

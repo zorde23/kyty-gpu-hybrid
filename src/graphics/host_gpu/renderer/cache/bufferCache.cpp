@@ -1768,7 +1768,7 @@ void BufferCache::FlushUploadBatch() {
 	command.EndRendering();
 	const auto native = command.Handle();
 	// A batch that copies to several buffers runs as one dispatch: a copy command each costs about
-	// as much GPU time as a small dispatch (GTA V: ~200 buffers per batch, several batches a frame).
+	// as much GPU time as a small dispatch (the title: ~200 buffers per batch, several batches a frame).
 	if (m_upload_batch_buffers.size() > 1 && ScatterUploadBatch(native)) {
 		m_upload_batch_buffers.clear();
 		m_upload_batch_copies.clear();
@@ -1888,7 +1888,7 @@ bool BufferCache::ScatterUploadBatch(const CommandRecorder& native) {
 }
 
 // Each buffer's upload would record its own pair of barriers: record them once, around the
-// copies of every buffer (hundreds per frame in GTA V).
+// copies of every buffer (hundreds per frame in the title).
 struct BufferCache::UploadBatch {
 	BufferCache& cache;
 	explicit UploadBatch(BufferCache& owner): cache(owner) {

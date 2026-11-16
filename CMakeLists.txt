@@ -78,7 +78,7 @@ elseif(KYTY_BUILD_ORIGIN STREQUAL "Fork")
 	set(KYTY_FORK_BUILD ON)
 endif()
 
-# KytyPS5-GTA test builds turn it on: a fatal error while creating a pipeline manifest record ends
+# kyty-gpu-hybrid test builds turn it on: a fatal error while creating a pipeline manifest record ends
 # the game (--strict-pipeline-manifest) instead of dropping the record. Releases keep it off.
 option(KYTY_STRICT_PIPELINE_MANIFEST_DEFAULT "Make --strict-pipeline-manifest the default" OFF)
 
@@ -208,11 +208,11 @@ add_subdirectory("${KYTY_THIRD_PARTY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/3rdparty
 option(KYTY_PGO_GENERATE "Instrumented build for profile-guided optimization (clang)" OFF)
 set(KYTY_PGO_USE "" CACHE FILEPATH "llvm-profdata output to optimize with (clang; empty: none)")
 set(KYTY_PGO_RUNTIME "" CACHE FILEPATH "clang_rt.profile-x86_64.lib (clang-cl; empty: search)")
-# KYTY_PGO: the profile kept in the repository, pgo/gtav.profdata (GTA V Performance and Fidelity,
+# KYTY_PGO: the profile kept in the repository, pgo/title.profdata (the title Performance and Fidelity,
 # recorded with LLVM 22.1.8; an older compiler cannot read it). KYTY_PGO_USE, when set, wins.
-option(KYTY_PGO "Optimize with pgo/gtav.profdata (clang)" OFF)
+option(KYTY_PGO "Optimize with pgo/title.profdata (clang)" OFF)
 if(KYTY_PGO AND NOT KYTY_PGO_USE AND NOT KYTY_PGO_GENERATE)
-	set(KYTY_PGO_USE "${CMAKE_CURRENT_SOURCE_DIR}/pgo/gtav.profdata")
+	set(KYTY_PGO_USE "${CMAKE_CURRENT_SOURCE_DIR}/pgo/title.profdata")
 endif()
 if(KYTY_PGO_GENERATE OR KYTY_PGO_USE)
 	if(NOT CLANG)

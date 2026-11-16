@@ -152,7 +152,7 @@ void DescriptorHeap::RetireCurrentPool() {
 bool DescriptorHeap::Allocate(vk::DescriptorSetLayout layout, Batch& batch) {
 	// Ask only for the sets that the pool has room for: a failed allocation can keep the room of
 	// the sets it did create (AMD's driver does), so asking an empty default pool for 32 sets of
-	// GTA V's bindless ray tracing table (20000-41000 sampled images each) left it unable to hold
+	// The title's bindless ray tracing table (20000-41000 sampled images each) left it unable to hold
 	// even one.
 	const auto& needs = LayoutSizes(layout);
 	uint32_t    count = std::min(DescriptorSetBatch, m_free_sets);

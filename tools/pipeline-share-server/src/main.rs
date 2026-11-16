@@ -30,7 +30,7 @@ struct Args {
     #[arg(long, default_value = store::LOOSE_RELEASE)]
     default_release: String,
     /// GitHub repository (`owner/name`) whose manifests are downloaded at every start.
-    #[arg(long, default_value = "TheCruZ/KytyPS5-GTA")]
+    #[arg(long, default_value = "zorde23/kyty-gpu-hybrid")]
     seed_repo: String,
     /// Branch of the seed repository.
     #[arg(long, default_value = "main")]

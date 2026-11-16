@@ -17,7 +17,7 @@ class RenderContext;
 // Compute shaders may store through V#s they read from a table at an index only the GPU knows
 // (IR::BufferResource::indirect_write_table). Such a store writes guest memory by device address,
 // which reaches only memory that a cached buffer holds, so every target the table names must be
-// cached before the dispatch. The tables are large (GTA V's is its 2 MiB descriptor heap) and
+// cached before the dispatch. The tables are large (the title's is its 2 MiB descriptor heap) and
 // rarely change, so each is kept as a snapshot that only the pages the CPU wrote since refresh.
 // Which pages the stores really wrote comes back from the shaders' write bitmap once they have
 // completed; only those bytes become GPU modified.

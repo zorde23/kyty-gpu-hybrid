@@ -36389,7 +36389,7 @@ TestCase BufferLoadsGpuSelectedDescriptors(u32 width, u32 wave = 32u, bool forma
   return test;
 }
 
-// GTA V (PPSA04263) ray tracing shaders read instance data with S_BUFFER_LOAD through a V# they
+// The title ray tracing shaders read instance data with S_BUFFER_LOAD through a V# they
 // loaded from a table at a GPU-computed offset: the DWORD at (offset & ~3) + immediate, zero past
 // NUM_RECORDS bytes (times the stride of a structured buffer).
 TestCase ScalarLoadsGpuSelectedDescriptors() {
@@ -36590,7 +36590,7 @@ TestCase BufferLoadGpuSelectedDescriptors(u32 wave, ShaderOpcode load) {
     std::copy(row.begin(), row.end(), test.initial.begin() + descriptor_base / 4u + i * 8);
     if (!input.zero_payload)
       std::copy(payload.begin(), payload.end(), test.initial.begin() + data_offset / 4);
-    // Read the selection on the GPU, as GTA's descriptor waterfall does.
+    // Read the selection on the GPU, as the title's descriptor waterfall does.
     test.initial[selection_base / 4u + i] = std::size(cases) - 1 - i;
     test.expected.push_back(cases[std::size(cases) - 1 - i].expected);
   }
@@ -36756,7 +36756,7 @@ TestCase BufferStoresGpuSelectedDescriptors() {
   for (u32 i = 0; i < std::size(cases); ++i) {
     const auto &input = cases[i];
     const u32 data_offset = 2048 + i * 64;
-    // 16-byte table entries, as in PPSA04263's skinning shaders.
+    // 16-byte table entries, as in the title's skinning shaders.
     const std::array<u32, 4> descriptor{
         static_cast<u32>(input.base + data_offset),
         static_cast<u32>(input.base >> 32u), input.records,
@@ -50131,7 +50131,7 @@ void CheckPs5GameExampleImageClearRuntimeShape() {
                                     packed_clear, size),
           "partial buffer coverage was classified as a complete clear");
 
-  // Same descriptor/dispatch as GTA3, with the stored value encoded in the
+  // Same descriptor/dispatch as the remaster, with the stored value encoded in the
   // shader.
   user_data = {0x00200000u, 4u << 16u, 64u, 0x14204u};
   compute.workgroup_register = 4;
@@ -50149,7 +50149,7 @@ void CheckPs5GameExampleImageClearRuntimeShape() {
                                    packed_clear, size) &&
               descriptor.Base48() == 0x200000u && size == 256u &&
               packed_clear == 0u,
-          "GTA3's actual scalar store was not recognized from IR");
+          "The remaster's actual scalar store was not recognized from IR");
   Require("Ps5GameExampleImageClear", "excess dispatch",
           !ResolveComputeBufferFill(compute, 2, 1, 1, 0x41u, descriptor,
                                     packed_clear, size),
@@ -50228,7 +50228,7 @@ void CheckPs5GameExampleImageClearRuntimeShape() {
           ResolveComputeBufferFill(compute, 1, 1, 1, 0x41u, descriptor,
                                    packed_clear, size) &&
               packed_clear == scalar_clear && descriptor.Base48() == 0x200000u,
-          "GTA3's scalar input was confused with its destination");
+          "The remaster's scalar input was confused with its destination");
   std::printf("[host]    %-32s ok\n", "Ps5GameExampleImageClear");
 }
 
@@ -52876,7 +52876,7 @@ void CheckImageSamplerSpecialization() {
                              .read_specialization_memory = ReadTestMemory};
     FakeGuestMemory fake(ReadTestMemory, &memory);
     // The fork binds the whole T# table (bindless) before expanding bounded material keys:
-    // GTA V's ray tracing shaders select among ~500 material T#s, and one image per key took
+    // The title's ray tracing shaders select among ~500 material T#s, and one image per key took
     // the driver minutes to compile.
     Require(name, "bindless table material plan",
             !translated.program.has_address_writes &&

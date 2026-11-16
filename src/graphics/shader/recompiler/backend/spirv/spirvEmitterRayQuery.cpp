@@ -465,7 +465,7 @@ uint32_t AlphaRecordCheck(EmitterState& s, std::span<const uint32_t> words) {
 	return Or(s, And(s, hash, ~3u), U32(s, 1));
 }
 
-// GTA V's alpha test of an alpha tested candidate (see RayTracingAlphaTest in RayTracingPatch.h):
+// The title's alpha test of an alpha tested candidate (see RayTracingAlphaTest in RayTracingPatch.h):
 // whether the guest leaf code would accept it. Fields of one guest object are read with one
 // translation of its address.
 //

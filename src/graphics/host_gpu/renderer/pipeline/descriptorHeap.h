@@ -30,7 +30,7 @@ public:
 	                           std::span<const vk::DescriptorSetLayoutBinding> bindings);
 
 	// Sampled images of one pool; bindless image tables take tens of thousands of them per set
-	// (GTA V's ray tracing table: ~82000).
+	// (the title's ray tracing table: ~82000).
 	static constexpr uint32_t MaxSampledImages = 262144;
 
 private:

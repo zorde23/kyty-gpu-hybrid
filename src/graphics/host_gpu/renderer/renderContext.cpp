@@ -244,7 +244,7 @@ void RenderContext::CacheDmaBases(const ShaderStageRuntime& runtime) {
 		}
 		// DMA reaches only memory with a cached buffer; any other access records a fault and
 		// reads zero, and the buffer arrives after the shader has run. That loses data the guest
-		// writes for a single dispatch, such as the glyph bitmaps GTA V copies into its font atlas.
+		// writes for a single dispatch, such as the glyph bitmaps the title copies into its font atlas.
 		m_mapped_ranges.ForEachInRange(base, BufferCache::CACHING_PAGESIZE,
 		                               [this](uint64_t start, uint64_t end) {
 			                               (void)m_buffer_cache.FindBuffer(start, end - start);

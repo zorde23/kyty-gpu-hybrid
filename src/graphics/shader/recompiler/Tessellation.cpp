@@ -235,7 +235,7 @@ void ReflectTessellationLayout(const Decoder::Program& program, bool local,
 					break;
 				case Opcode::V_AND_B32: {
 					// The patch ordinal (low byte of the packed HS ID) as an AND instead of a BFE (Wolverine's
-					// terrain HS a9f31c39ad53f06c, GTA V's tree trunk HS): one patch, so 0. Any mask that
+					// terrain HS a9f31c39ad53f06c, the title's tree trunk HS): one patch, so 0. Any mask that
 					// keeps only bits of that byte gives 0.
 					const auto mask_of = [](Address operand) {
 						return operand.kind == Kind::Affine && operand.coefficient == 0u &&

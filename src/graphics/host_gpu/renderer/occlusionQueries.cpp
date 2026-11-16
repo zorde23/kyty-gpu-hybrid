@@ -22,7 +22,7 @@ namespace Libs::Graphics {
 
 namespace {
 
-// Host queries waiting for their results; GTA V keeps a few dozen per frame in flight.
+// Host queries waiting for their results; the title keeps a few dozen per frame in flight.
 constexpr uint32_t PoolCapacity = 16384;
 
 // Dumps of one command buffer whose running totals WriteForReaders() computes on the GPU.
@@ -160,7 +160,7 @@ void OcclusionQueries::OnFrame() {
 		                           "OcclusionQueries::OnFrame", 0, 0);
 	}
 	// The execution thread writes the end-of-pipe labels and flips that pace the guest before
-	// the GPU runs the work, so the GPU can fall more than a frame behind them. GTA V (PPSA04263)
+	// the GPU runs the work, so the GPU can fall more than a frame behind them. The title
 	// takes the counters of a frame a few frames later, and on the console they are there by
 	// then: when a counter of its water was published a flip later than usual, the game drew a
 	// frame of the water without reflections and waves. Wait for the GPU to finish the

@@ -3756,7 +3756,7 @@ void TestPointerTableIndexedMaterialKeys() {
         "pointer-table selector lost sorted raw keys or the OOB-zero root descriptor");
 }
 
-// GTA V PS 0xf6b18542ea0e938a computes its sampler's border color word in a way tracking cannot
+// The title PS 0xf6b18542ea0e938a computes its sampler's border color word in a way tracking cannot
 // follow; only that word may fall back to a constant.
 void TestUntrackableSamplerBorderWord() {
   const auto track = [](uint32_t lane_word) {
@@ -5383,7 +5383,7 @@ void TestComputeBufferFill() {
     const bool expected = !options.conditional && !options.shifted &&
                           !options.extra_store && !options.branch;
     Check((snapshot.uniform_fill.words != 0) == expected,
-          "fill proof accepted an unsafe store or missed the real GTA3 clear");
+          "fill proof accepted an unsafe store or missed the real remaster clear");
     if (expected) {
       Check(snapshot.uniform_fill.words == 1 &&
                 snapshot.uniform_fill.group_stride[0] == 64 &&
@@ -5466,7 +5466,7 @@ void TestDenseBufferTracking() {
              "resource tracking allowed a second mutation pass");
 }
 
-// GTA V ray tracing: after a hit, S_BUFFER_LOAD reads instance data through a V# that
+// The title ray tracing: after a hit, S_BUFFER_LOAD reads instance data through a V# that
 // S_BUFFER_LOAD_DWORDX4 selected from a table at a GPU-computed offset.
 void TestIndirectScalarReads() {
   Fixture fixture;
@@ -5502,7 +5502,7 @@ void TestIndirectScalarReads() {
         "a GPU-selected scalar read bound more than its V# table");
 }
 
-// GTA V ray tracing: the BVH traversal reads instance nodes at base + (node >> 3) << 7 with the
+// The title ray tracing: the BVH traversal reads instance nodes at base + (node >> 3) << 7 with the
 // node it popped off a lane stack. Reads behind such an address cannot be flattened into host SRT
 // reads; reads the host can evaluate still are.
 void TestGpuDependentAddressReads() {
@@ -5548,7 +5548,7 @@ void TestGpuDependentAddressReads() {
   Check(fixture.program.info.uses_dma, "GPU-dependent address reads did not use DMA");
 }
 
-// GTA V skinning: the store V# is S_BUFFER_LOAD_DWORDX4 from a V# table at key * 16.
+// The title skinning: the store V# is S_BUFFER_LOAD_DWORDX4 from a V# table at key * 16.
 void EmitVSharpTableStore(Fixture &fixture, std::array<MemoryFlags, 4> &reads,
                           MemoryFlags &store) {
   const auto table = fixture.Buffer(
@@ -8628,7 +8628,7 @@ void TestDynamicFlatAddressesUseDma() {
 }
 
 void TestDmaBaseRegisters() {
-  // PPSA04263 glyph upload (cs e9e4f0b919d80844): v_add_co_u32 v1, s12, v6;
+  // The title glyph upload (cs e9e4f0b919d80844): v_add_co_u32 v1, s12, v6;
   // v_add_co_ci_u32 v2, 0, s13 addresses a FLAT_LOAD_UBYTE.
   Fixture fixture;
   const auto lane = fixture.Emit(ValueOpcode::UndefU32);
@@ -8830,7 +8830,7 @@ ResourcePlan ConditionalBufferPlan(ConditionalBufferUse use) {
 
 void TestConditionalBufferMaterialization() {
   auto plan = ConditionalBufferPlan(ConditionalBufferUse::Optional);
-  // GTA III leaves packet words in s[12:15] when its scalar control word is zero.
+  // a remastered title leaves packet words in s[12:15] when its scalar control word is zero.
   std::array<uint32_t, 8> user_data{
       0x1000, 16u << 16u, 1, 0x4dfac,
       0xc0107600, 0x8c, 0x97730000, 0x100020};
@@ -9010,7 +9010,7 @@ void TestConservativeBufferReachability() {
 }
 
 void TestBindlessImageTable() {
-  // A key the host cannot probe binds every distinct T# of the table, as GTA V (PPSA04263)
+  // A key the host cannot probe binds every distinct T# of the table, as the title
   // CS 0xc6c91cf1882cdc3b samples material textures by a GPU-written index, masking the
   // table offset with 0x1fffffe0.
   auto fixture = MakeIndirectImageFixture(false, 32u, 0u, 0u, false, ValueOpcode::ImageSampleRaw, false,
@@ -9084,7 +9084,7 @@ void TestBindlessImageTable() {
 }
 
 void TestBindlessImageTableQuery() {
-  // GTA V (PPSA04263) CS 0xedc5bdc9a5687671 (Performance RT) also queries the size of a
+  // The title CS 0xedc5bdc9a5687671 (Performance RT) also queries the size of a
   // material table texture: IMAGE_GET_RESINFO through the T# its alpha test samples.
   auto fixture = MakeIndirectImageFixture(false, 32u, 0u, 0u, false, ValueOpcode::ImageSampleRaw, false,
                                           UINT32_MAX, 0x1fffffe0u);
@@ -9138,7 +9138,7 @@ void TestBindlessImageTableQuery() {
 }
 
 void TestBindlessImageTableSharedRegisters() {
-  // GTA V (PPSA04263) CS 0xca313cf56ef25496 reuses the SGPRs of a material T# for other data, so
+  // The title CS 0xca313cf56ef25496 reuses the SGPRs of a material T# for other data, so
   // a T# word also reaches a Phi of the register's other lifetime. The table plan still applies
   // to the image; the read stays an ordinary scalar load for the Phi.
   namespace CFG = Libs::Graphics::ShaderRecompiler::CFG;
@@ -9193,7 +9193,7 @@ void TestBindlessImageTableSharedRegisters() {
             fixture->program.memory_info[other_read->Flags<MemoryFlags>().index].planning_only,
         "only the T# word with a non-image use must stay an emitted scalar load");
   // The kept load is an ordinary buffer access: it needs a buffer of its own. Left with the
-  // decoder's index, ExtractResourcePlan indexed past the buffers (GTA V Fidelity crash).
+  // decoder's index, ExtractResourcePlan indexed past the buffers (the title Fidelity crash).
   const auto &kept = fixture->program.memory_info[shared_read->Flags<MemoryFlags>().index];
   Check(kept.kind == ResourceKind::IndirectBuffer ||
             kept.resource < fixture->program.info.buffers.size(),

@@ -625,7 +625,7 @@ void TextureCache::UntrackImageTail(ImageId id) {
 
 void TextureCache::TrackImageDownload(ImageId id, Image& image) {
 	// Small tiled targets are written back too: games read GPU results such as reductions and
-	// simulation state from them on the CPU (PPSA04263 keeps the origin of its ocean wave grid
+	// simulation state from them on the CPU (the title keeps the origin of its ocean wave grid
 	// in a 1x1 R32G32 target, and its water physics read it to sample the wave heights).
 	const auto& info   = image.info;
 	const auto  texels = static_cast<uint64_t>(info.extent.width) * info.extent.height *
@@ -943,7 +943,7 @@ void TextureCache::CopyImageMip(ImageId destination_id, ImageId source_id, uint3
 	}
 }
 
-// PPSA04264, PPSA04288
+// The title, PPSA04288
 // A partial view retains the entire matching array layout. HTile belongs to
 // the depth source, independently of the data slices copied into color storage.
 static bool RetainsCachedDepthLayout(const ImageInfo& requested, const Image& cached) {

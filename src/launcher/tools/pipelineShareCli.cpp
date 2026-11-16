@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
 	options.client_id        = argc > 4 ? QString::fromLocal8Bit(argv[4])
 	                                    : QUuid::createUuid().toString(QUuid::WithoutBraces);
 	options.emulator_version = QStringLiteral("pipeline_share_cli");
-	options.user_agent       = QStringLiteral("KytyPS5-GTA-launcher/cli");
+	options.user_agent       = QStringLiteral("kyty-gpu-hybrid-launcher/cli");
 	int result               = 1;
 	PipelineShareSync sync(options);
 	QObject::connect(&sync, &PipelineShareSync::Finished, &app, [&](bool ok, const QString& text) {

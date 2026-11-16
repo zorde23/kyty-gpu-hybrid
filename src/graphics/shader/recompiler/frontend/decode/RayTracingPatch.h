@@ -12,7 +12,7 @@ namespace Libs::Graphics::ShaderRecompiler::Decoder {
 // Native ray tracing of guest BVH traversal loops.
 //
 // Games using sce::Psr traverse its BVHs in software, with a traversal loop of the library
-// compiled into their shaders (the variants GTA V uses are recognized; Astro Bot's are not yet).
+// compiled into their shaders (the variants the title uses are recognized; Astro Bot's are not yet).
 // In the packet variant a wave-wide loop pops a node from a stack kept in
 // VGPR lanes, tests it with IMAGE_BVH_INTERSECT_RAY and pushes the children the lanes hit. Box nodes
 // are 9 of 10 node visits. The patch keeps the guest code that sets up an instance (object
@@ -60,7 +60,7 @@ enum class RayTracingKind : uint32_t {
 // A register a site does not have.
 constexpr uint32_t NoRegister = 0xffffffffu;
 
-// The alpha test of a Packet site's leaf code, when it is GTA V's (see DeriveAlphaTest in
+// The alpha test of a Packet site's leaf code, when it is the title's (see DeriveAlphaTest in
 // RayTracingPatch.cpp): the native traversal runs it per lane on each alpha tested candidate the
 // hardware reports and confirms the candidates it accepts, so the guest leaf code never runs.
 // Per triangle (node N, primitive word W) of instance record R:
