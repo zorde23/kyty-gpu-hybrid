@@ -2386,16 +2386,27 @@ void TextureCache::FlushGpuImagesToGuest() {
 					return;
 				}
 				const auto& info = image.info;
-				if (DownloadImageMemory(id)) {
+				// DownloadDepth() stops the emulator on these layouts; the capture leaves them out.
+				const uint64_t texels_per_slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
+				const auto     transfer_bytes   = DepthAspectTransferBytes(info.pixel_format);
+				const bool     depth_layout_ok  =
+				    UploadBinding(image) != BindingType::DepthTarget ||
+				    (transfer_bytes != 0 && texels_per_slice <= UINT32_MAX &&
+				     texels_per_slice * info.bytes_per_block <= info.linear_slice_stride &&
+				     (transfer_bytes == info.bytes_per_block ||
+				      (info.bytes_per_block == sizeof(uint16_t) && transfer_bytes == sizeof(uint32_t))));
+				if (depth_layout_ok && DownloadImageMemory(id)) {
 					written++;
 					bytes += info.data.size;
 					return;
 				}
 				skipped++;
-				const char* reason = image.depth_id         ? "aliases a depth image"
-				                     : !image.SafeToDownload() ? "the CPU wrote it after the GPU"
-				                     : !CanDownload(image)     ? "Kyty cannot write this layout back"
-				                                               : "its guest memory is not readable";
+				const char* reason = image.depth_id              ? "aliases a depth image"
+				                     : image.IsCpuDirty()        ? "the CPU wrote it after the GPU"
+				                     : image.IsBufferModified()  ? "a buffer write after the GPU's is still in the buffer cache"
+				                     : !depth_layout_ok          ? "a depth layout Kyty cannot write back"
+				                     : !CanDownload(image)       ? "Kyty cannot write this layout back"
+				                                                 : "its guest memory is not readable";
 				std::fprintf(stderr, "[kyty-gpu] capture: image 0x%llx %ux%u format %u tile %u samples %u not written back (%s)\n",
 				             static_cast<unsigned long long>(info.data.address), info.extent.width, info.extent.height,
 				             static_cast<unsigned>(info.guest_format), static_cast<unsigned>(info.tile_mode), static_cast<unsigned>(info.samples), reason);
