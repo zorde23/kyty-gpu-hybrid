@@ -2402,7 +2402,8 @@ void TextureCache::FlushGpuImagesToGuest() {
 				}
 				skipped++;
 				const char* reason = image.depth_id              ? "aliases a depth image"
-				                     : image.IsCpuDirty()        ? "the CPU wrote it after the GPU"
+				                     : image.IsDefinitelyCpuDirty() ? "the CPU wrote it after the GPU"
+				                     : image.IsMaybeCpuDirty()   ? "its pages are no longer watched, so a CPU write cannot be ruled out"
 				                     : image.IsBufferModified()  ? "a buffer write after the GPU's is still in the buffer cache"
 				                     : !depth_layout_ok          ? "a depth layout Kyty cannot write back"
 				                     : !CanDownload(image)       ? "Kyty cannot write this layout back"
