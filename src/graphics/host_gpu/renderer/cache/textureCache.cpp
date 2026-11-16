@@ -2386,6 +2386,10 @@ void TextureCache::FlushGpuImagesToGuest() {
 					return;
 				}
 				const auto& info = image.info;
+				// As RefreshImage() does: a guest store that left the image's edges unchanged did not replace it.
+				if (image.IsMaybeCpuDirty()) {
+					image.ResolveMaybeCpuHash(image.HashGuestEdges());
+				}
 				// DownloadDepth() stops the emulator on these layouts; the capture leaves them out.
 				const uint64_t texels_per_slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
 				const auto     transfer_bytes   = DepthAspectTransferBytes(info.pixel_format);
