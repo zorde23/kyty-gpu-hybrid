@@ -20,4 +20,6 @@ GPL-2.0, as KytyPS5 (see `LICENSE`). The original Kyty code is MIT (see `LICENSE
 - InoriRus, for Kyty.
 - TheCruZ and the KytyPS5 contributors, for the fork this one starts from.
 
+Test suite: 37/79 pass on Windows/clang-cl; the failures predate this fork's changes.
+
 No game files, keys or firmware are part of this repository.
