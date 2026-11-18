@@ -251,7 +251,7 @@ bool ReadShaderGuestMemory(void*, uint64_t address, std::span<uint32_t> values) 
 }
 
 void DumpShader(std::span<const uint32_t> words, const std::string& name) {
-	if (!Config::GraphicsDebugDumpEnabled()) {
+	if (!Config::GraphicsDebugDumpEnabled() && Config::GetShaderLogDirection() != Config::LogDirection::File) {
 		return;
 	}
 	const auto path = Config::GetShaderLogFolder() / name;

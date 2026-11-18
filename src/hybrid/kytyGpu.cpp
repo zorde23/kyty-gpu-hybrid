@@ -158,6 +158,13 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 					    options.present_mode = Config::PresentMode::Immediate;
 				    }
 			    }
+			    // Diagnosis only: writes each shader's guest code, SPIR-V and IR to that folder, like pure Kyty's
+			    // --shader-log-direction File without the rest of --graphics-debug-dump.
+			    if (const char* dump = std::getenv("KYTY_HYB_SHADER_DUMP"); dump != nullptr && dump[0] != '\0') {
+				    options.shader_log_direction = Config::LogDirection::File;
+				    options.shader_log_folder    = dump;
+				    std::fprintf(stderr, "[kyty-gpu] shaders dumped to %s (KYTY_HYB_SHADER_DUMP)\n", dump);
+			    }
 			    std::fprintf(stderr, "[kyty-gpu] vblank %u Hz, present mode %d (KYTY_HYB_VBLANK_HZ, KYTY_HYB_PRESENT_MODE)\n",
 			                 options.vblank_frequency, static_cast<int>(options.present_mode));
 			    Config::Load(options);
