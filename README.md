@@ -7,7 +7,7 @@ This fork builds Kyty's GPU (the guest command processor, the shader recompiler 
 renderer) so that another PS5 compatibility layer can load it as a DLL and use it as its graphics
 backend. The rest of Kyty is kept so the fork can still be built and tested on its own.
 
-It is the graphics half of [ps5-hybrid](https://github.com/PS5-Hybrid/ps5-hybrid), which loads
+It is the graphics half of [ps5-hybrid](https://github.com/zorde23/ps5-hybrid), which loads
 `kyty_gpu.dll` as its GPU; ps5-hybrid's `tools/build_hybrid.ps1` builds it from this repository
 as a submodule.
 
