@@ -7,9 +7,12 @@ This fork builds Kyty's GPU (the guest command processor, the shader recompiler 
 renderer) so that another PS5 compatibility layer can load it as a DLL and use it as its graphics
 backend. The rest of Kyty is kept so the fork can still be built and tested on its own.
 
+It is the graphics half of [ps5-hybrid](https://github.com/PS5-Hybrid/ps5-hybrid), which loads
+`kyty_gpu.dll` as its GPU; ps5-hybrid's `tools/build_hybrid.ps1` builds it from this repository
+as a submodule.
+
 Branches:
-- `hibrido`: the GPU DLL build and the fixes it needs.
-- `kyty-puro`: the AMD fixes only, on top of KytyPS5, without the DLL changes.
+- `main`: the GPU DLL build and the fixes it needs, as used by ps5-hybrid.
 
 ## License
 
