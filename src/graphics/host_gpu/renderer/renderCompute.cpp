@@ -41,6 +41,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "graphics/host_gpu/renderer/csTrace.h"
+
 namespace Libs::Graphics {
 static bool FillSourcesDisjoint(std::span<const ShaderRecompiler::IR::DescriptorValue> sources,
                                  GuestRange destination, uint32_t output_buffer = UINT32_MAX) {
@@ -288,6 +290,7 @@ bool RenderExecutor::TryConsumeComputeFill(const ShaderComputeInputInfo& input,
 		// when CPU-owned, so color-clear discovery can read them without a GPU download.
 		m_context.GetBufferCache().FillBuffer(descriptor.Base48(), size, packed_clear, false);
 	}
+	CsTrace::NoteWrite(image_clear ? "compute image clear" : "compute fill", descriptor.Base48(), size, packed_clear);
 	static std::atomic<uint32_t> logged_clears {0};
 	if (logged_clears.fetch_add(1, std::memory_order_relaxed) < 32) {
 		LOGF("GraphicsRenderDispatchDirect: compute %s shader=0x%016" PRIx64
@@ -296,6 +299,62 @@ bool RenderExecutor::TryConsumeComputeFill(const ShaderComputeInputInfo& input,
 		     descriptor.Base48(), size, packed_clear);
 	}
 	return true;
+}
+
+// KYTY_HYB_TRACE_CS: the buffers of a dispatch of the traced shader (indirect ones log 0 groups).
+static void TraceDispatch(RenderContext& context, const ShaderComputeInputInfo& input) {
+	if (!CsTrace::Enabled()) {
+		return;
+	}
+	std::vector<std::pair<uint64_t, uint64_t>> ranges;
+	for (const auto& raw: input.stage.resources->buffers) {
+		const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(raw);
+		ranges.emplace_back(descriptor.Base48(), descriptor.GetSize());
+	}
+	if (!CsTrace::NoteDispatch(input.stage.module->info.shader_hash, ranges, input.workgroup_counts[0],
+	                           input.workgroup_counts[1], input.workgroup_counts[2])) {
+		return;
+	}
+	const auto index = CsTrace::LastDispatchIndex();
+	if (!CsTrace::DumpFolder().empty() && index < CsTrace::MaxDumpedDispatches) {
+		// KYTY_HYB_TRACE_CS_DUMP: one forced download of every buffer, written as it is before the dispatch.
+		constexpr uint64_t MaxBytes = 256ull << 20u;
+		for (size_t i = 0; i < ranges.size(); i++) {
+			const auto [address, size] = ranges[i];
+			const auto bytes          = std::min(size, MaxBytes) & ~uint64_t {3};
+			if (address == 0 || bytes == 0 || !context.IsMapped(address, bytes)) {
+				continue;
+			}
+			context.GetBufferCache().ReadMemory(address, bytes);
+			std::vector<uint8_t> data(bytes);
+			if (!LibKernel::Memory::TryReadBacking(address, data.data(), bytes)) {
+				continue;
+			}
+			char path[1024];
+			std::snprintf(path, sizeof(path), "%s/dispatch%" PRIu64 "_buffer%zu_%012" PRIx64 ".bin", CsTrace::DumpFolder().c_str(),
+			              index, i, address);
+			if (FILE* file = std::fopen(path, "wb"); file != nullptr) {
+				std::fwrite(data.data(), 1, data.size(), file);
+				std::fclose(file);
+				std::fprintf(stderr, "[cs-trace] wrote %s (0x%" PRIx64 " bytes)\n", path, bytes);
+			} else {
+				std::fprintf(stderr, "[cs-trace] cannot open %s\n", path);
+			}
+		}
+	}
+	if (index == 0 && CsTrace::SyncRequested() && !ranges.empty() && ranges[0].first != 0 &&
+	    ranges[0].second >= sizeof(uint32_t)) {
+		// KYTY_HYB_TRACE_CS_SYNC: one forced download of the first buffer, as the GPU holds it now.
+		std::array<uint32_t, 8> words {};
+		const auto bytes = std::min<uint64_t>(ranges[0].second, sizeof(words)) & ~uint64_t {3};
+		if (!context.IsMapped(ranges[0].first, bytes)) {
+			return;
+		}
+		context.GetBufferCache().ReadMemory(ranges[0].first, bytes);
+		if (LibKernel::Memory::TryReadBacking(ranges[0].first, words.data(), bytes)) {
+			CsTrace::NoteGpuWords(ranges[0].first, std::span {words.data(), static_cast<size_t>(bytes / 4)});
+		}
+	}
 }
 
 // Global loads read pages without a buffer as zero. Back the 32 KiB after each base the shader
@@ -447,6 +506,7 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 
 	const auto& program   = input_info.stage.module->info;
 	const auto& resources = *input_info.stage.resources;
+	TraceDispatch(m_context, input_info);
 	if (resources.specialization_reads.empty() &&
 	    (TryConsumeComputeMetaClear(input_info, buffer) ||
 	     TryConsumeComputeFill(input_info, buffer, thread_group_x, thread_group_y,
@@ -490,6 +550,13 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 	RebindImages(bindings);
 	BindSharedMemory(m_context, input_info, bindings);
 	RebindBuffers(bindings);
+	if (CsTrace::Enabled()) {
+		std::vector<std::pair<uint64_t, uint64_t>> descriptors;
+		for (const auto& info: bindings.buffers) {
+			descriptors.emplace_back(info.offset, info.range);
+		}
+		CsTrace::NoteBindings(program.shader_hash, bindings.shader_data, descriptors);
+	}
 	m_context.GetOcclusionQueries().WriteForReaders();
 
 	const auto vk_buffer = buffer.Handle();
@@ -681,6 +748,7 @@ void RenderExecutor::DispatchIndirectThreads(CommandBuffer& buffer, uint64_t arg
 	if (compute_module == nullptr) {
 		return;
 	}
+	TraceDispatch(m_context, input_info);
 	const auto& program = input_info.stage.module->info;
 	EXIT_IF(program.bindings.UsesPushData());
 	// Metadata clears are tracked as in the direct path; it does not depend on the size.
@@ -835,6 +903,7 @@ void RenderExecutor::DispatchIndirect(CommandBuffer& buffer, uint64_t args_addr,
 		compute_module = m_context.GetPipelineCache().GetComputeProgram(cs_regs, input_info);
 	}
 	if (compute_module == nullptr) return;
+	TraceDispatch(m_context, input_info);
 	buffer.EndRendering();
 	auto& pipeline = m_context.GetPipelineCache().GetComputePipeline(input_info);
 	auto& bindings = m_compute_bindings;

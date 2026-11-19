@@ -47,6 +47,8 @@
 #include <utility>
 #include <vector>
 
+#include "graphics/host_gpu/renderer/csTrace.h"
+
 namespace Libs::Graphics {
 
 static thread_local CommandProcessor* g_current_processor = nullptr;
@@ -968,6 +970,8 @@ void CommandProcessor::WriteData(uint32_t* dst, const uint32_t* src, uint32_t dw
 	if (dw_num == 0) {
 		return;
 	}
+	CsTrace::NoteWrite("write_data", reinterpret_cast<uint64_t>(dst),
+	                   uint64_t {write_one_address ? 1u : dw_num} * sizeof(uint32_t), src[write_one_address ? dw_num - 1 : 0]);
 
 	// The source dwords are in the command buffer, which stays valid until the guest sees a
 	// later label.
@@ -1017,7 +1021,14 @@ void CommandProcessor::WriteReferenceClock(uint64_t dst_address, uint32_t num_by
 void CommandProcessor::DmaData(uint8_t dst_sel, uint64_t dst_address_or_offset, uint8_t src_sel,
                                uint64_t src_address_or_offset_or_immediate, uint32_t num_bytes) {
 	if (num_bytes == 0 || static_cast<uint32_t>(dst_address_or_offset) == 0x3022cu) {
+		if (num_bytes != 0) {
+			CsTrace::NoteDroppedDma(dst_address_or_offset, num_bytes, src_sel, src_address_or_offset_or_immediate);
+		}
 		return;
+	}
+	if (dst_sel == 0 || dst_sel == 3) {
+		CsTrace::NoteWrite(src_sel == 2 ? "dma fill" : "dma copy", dst_address_or_offset, num_bytes,
+		                   src_address_or_offset_or_immediate);
 	}
 	auto decode_gds = [](uint8_t selector, bool& is_gds) {
 		switch (selector) {
