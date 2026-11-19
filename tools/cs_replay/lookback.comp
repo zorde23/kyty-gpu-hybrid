@@ -1,0 +1,73 @@
+#version 460
+// A single-pass prefix sum with a decoupled look-back, built like the guest radix sort that hung AMD's
+// Windows driver: thread 0 takes the tile ticket with an atomic and is the only one that looks back, so
+// every fence it runs is in divergent code. With FENCE_SCOPE_SUBGROUP the fences are subgroup scope, as
+// Kyty now emits them; without it they are device scope, which that driver turns into an s_barrier.
+#extension GL_KHR_shader_subgroup_basic : require
+
+layout(local_size_x = 256) in;
+// One storage buffer array at binding 0, as Kyty binds a shader's buffers: ticket, tile status, values.
+layout(set = 0, binding = 0) coherent buffer Words { uint words[]; } buffers[3];
+#define ticket buffers[0].words
+#define status buffers[1].words
+#define values buffers[2].words
+layout(push_constant) uniform Push { uint count; };
+
+shared uint tile;
+shared uint sums[256];
+shared uint prefix;
+
+const uint Aggregate = 1u << 30;
+const uint Inclusive = 2u << 30;
+const uint Mask      = (1u << 30) - 1u;
+
+void Fence() {
+#ifdef FENCE_SCOPE_SUBGROUP
+	subgroupMemoryBarrierBuffer();
+#else
+	memoryBarrierBuffer();
+#endif
+}
+
+void main() {
+	const uint lane = gl_LocalInvocationID.x;
+	if (lane == 0) {
+		tile = atomicAdd(ticket[0], 1u);
+		Fence();
+	}
+	barrier();
+	const uint t     = tile;
+	const uint index = t * 256u + lane;
+	sums[lane]       = index < count ? values[index] : 0u;
+	barrier();
+	for (uint step = 1u; step < 256u; step <<= 1u) {
+		const uint add = lane >= step ? sums[lane - step] : 0u;
+		barrier();
+		sums[lane] += add;
+		barrier();
+	}
+	if (lane == 0) {
+		const uint aggregate = sums[255];
+		status[t]            = (t == 0u ? Inclusive : Aggregate) | aggregate;
+		Fence();
+		uint sum = 0u;
+		if (t > 0u) {
+			uint j = t - 1u;
+			for (;;) {
+				const uint s = status[j];
+				if ((s & ~Mask) == 0u) {
+					Fence();
+					continue;
+				}
+				sum += s & Mask;
+				if ((s & ~Mask) == Inclusive) break;
+				j--;
+			}
+			status[t] = Inclusive | (sum + aggregate);
+			Fence();
+		}
+		prefix = sum;
+	}
+	barrier();
+	if (index < count) values[index] = prefix + sums[lane];
+}

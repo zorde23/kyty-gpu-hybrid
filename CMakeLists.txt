@@ -1013,6 +1013,29 @@ if(BUILD_TESTING)
 	)
 endif()
 
+# cs_replay replays one compute dispatch outside the game (tools/cs_replay). Its synthetic look-back test
+# checks that the subgroup-scope fences the recompiler emits keep a decoupled look-back correct on the GPU:
+# AMD's Windows driver turns workgroup- and device-scope fences into s_barrier, which divergent code breaks.
+find_package(Vulkan QUIET)
+if(BUILD_TESTING AND WIN32 AND TARGET Vulkan::Vulkan)
+	add_executable(cs_replay "${CMAKE_CURRENT_SOURCE_DIR}/tools/cs_replay/cs_replay.cpp")
+	target_link_libraries(cs_replay PRIVATE Vulkan::Vulkan)
+	target_compile_features(cs_replay PRIVATE cxx_std_20)
+	set(cs_replay_lookback_spv "${CMAKE_CURRENT_BINARY_DIR}/lookback_subgroup.spv")
+	add_custom_command(
+		OUTPUT "${cs_replay_lookback_spv}"
+		COMMAND "${KYTY_GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 -DFENCE_SCOPE_SUBGROUP
+		        -o "${cs_replay_lookback_spv}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/cs_replay/lookback.comp"
+		DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/cs_replay/lookback.comp"
+		VERBATIM
+	)
+	add_custom_target(cs_replay_shaders DEPENDS "${cs_replay_lookback_spv}")
+	add_dependencies(cs_replay cs_replay_shaders)
+	add_test(NAME lookback_subgroup_fences
+	         COMMAND $<TARGET_FILE:cs_replay> "${cs_replay_lookback_spv}" synthetic:262144 0 1024 0 0)
+	set_tests_properties(lookback_subgroup_fences PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
 # Test Darwin signal-context restoration for SSE4a instructions.
 if(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR
 		(NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")))
