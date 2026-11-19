@@ -2034,12 +2034,29 @@ void TestNativeStoreCompletion() {
     Check(store < completion && completion < atomic && atomic != std::string::npos,
           "store completion moved outside its native publication order");
     const auto source = DisassembleSpirvBinary(result.spirv);
-    const auto barrier = source.find("OpControlBarrier %uint_3 %uint_1 %uint_2116");
+    // Subgroup scope: a wider one becomes an s_barrier on AMD's Windows driver.
+    const auto barrier = source.find("OpMemoryBarrier %uint_3 %uint_2116");
     Check(barrier != std::string::npos &&
               source.find("OpStore") < barrier &&
               barrier < source.find("OpAtomicIAdd") &&
-              source.find("OpControlBarrier", barrier + 1) == std::string::npos,
-          "store completion must synchronize the subgroup once after both wave halves");
+              source.find("OpMemoryBarrier %uint_3 %uint_2116", barrier + 1) == std::string::npos &&
+              source.find("OpControlBarrier") == std::string::npos,
+          "store completion must be one subgroup-scope fence after both wave halves");
+  }
+
+  // A glc load is a device-scope atomic load: AMD's Windows driver hoists a Volatile load out of
+  // a loop that waits for another workgroup's flag.
+  for (const bool glc : {false, true}) {
+    const std::array load_store = {
+        EncodeMubuf0(0x0c, 0, false, glc), EncodeMubuf1(2, 0, 0),
+        EncodeMubuf0(0x1c, 4, false), EncodeMubuf1(2, 0, 0),
+        EncodeSopp(0x01),
+    };
+    const auto loaded = RecompileForTest(load_store, options);
+    CheckSpirvBinaryValidates(loaded.spirv);
+    constexpr uint32_t OpAtomicLoad = 227;
+    Check(SpirvInstructionOpcodeCount(loaded.spirv, OpAtomicLoad) == (glc ? 1u : 0u),
+          "a glc buffer load must be the only atomic load");
   }
 
   const std::array no_store_wait = {

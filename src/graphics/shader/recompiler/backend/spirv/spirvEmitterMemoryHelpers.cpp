@@ -1,5 +1,9 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <string_view>
+
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 
 uint32_t EmitPushDataLoad(EmitterState& state, uint32_t index) {
@@ -672,7 +676,38 @@ uint32_t EmitAtomicOperation(ValueEmitContext& ctx, const IR::Inst& inst, uint32
 }
 
 void EmitAtomicMemoryBarrier(EmitterState& state, IR::ResourceKind kind) {
-	const auto scope  = kind == IR::ResourceKind::Lds ? spv::ScopeWorkgroup : spv::ScopeDevice;
+	// KYTY_NO_ATOMIC_BARRIER (diagnosis, as AnyPS5's APS5_NO_ATOMIC_BARRIER) drops this fence: "device"
+	// only after buffer atomics (and sub-dword buffer stores, which update a word atomically), any other
+	// value after all of them (LDS and image too).
+	static const int no_barrier = [] {
+		const char* value = std::getenv("KYTY_NO_ATOMIC_BARRIER");
+		if (value == nullptr || value[0] == '\0') {
+			return 0;
+		}
+		const bool device = std::string_view(value) == "device";
+		std::fprintf(stderr, "[kyty-gpu] KYTY_NO_ATOMIC_BARRIER=%s: no fence after %s atomics\n", value,
+		             device ? "buffer" : "any");
+		return device ? 1 : 2;
+	}();
+	if (no_barrier == 2 || (no_barrier == 1 && (kind == IR::ResourceKind::Buffer || kind == IR::ResourceKind::ScalarBuffer))) {
+		return;
+	}
+	// A GCN atomic implies no fence: this one only orders the wave's own accesses, as S_WAITCNT does.
+	// A workgroup or device scope makes AMD's Windows driver emit an s_barrier, which deadlocks or
+	// reorders the waves when only some of them run the atomic (a ticket taken by one thread).
+	// KYTY_ATOMIC_FENCE_SCOPE (diagnosis): "buffer" keeps the old workgroup scope for LDS and device
+	// scope for images and GDS, "legacy" keeps them all as they were.
+	static const int fence_scope = [] {
+		const char* value = std::getenv("KYTY_ATOMIC_FENCE_SCOPE");
+		const int   mode  = value == nullptr ? 0 : std::string_view(value) == "buffer" ? 1 : std::string_view(value) == "legacy" ? 2 : 0;
+		if (mode != 0) {
+			std::fprintf(stderr, "[kyty-gpu] KYTY_ATOMIC_FENCE_SCOPE=%s\n", value);
+		}
+		return mode;
+	}();
+	const bool buffer = kind == IR::ResourceKind::Buffer || kind == IR::ResourceKind::ScalarBuffer;
+	const auto legacy = kind == IR::ResourceKind::Lds ? spv::ScopeWorkgroup : spv::ScopeDevice;
+	const auto scope  = fence_scope == 2 || (fence_scope == 1 && !buffer) ? legacy : spv::ScopeSubgroup;
 	const auto memory = [&] {
 		switch (kind) {
 			case IR::ResourceKind::Lds:

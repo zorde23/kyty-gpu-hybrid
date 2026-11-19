@@ -41264,11 +41264,11 @@ TestCase BufferWorkgroupPublication(u32 wave_size, bool dlc_only = false,
                   O::S_CMP_LT_U32, O::S_CBRANCH_SCC1, O::S_ADD_U32,
                   O::S_WAITCNT, O::BUFFER_LOAD_DWORD, O::V_ADD_NC_U32,
                   O::BUFFER_STORE_DWORD, O::S_ENDPGM};
-  test.required_spirv = {"Coherent", "Volatile", "OpAtomicIAdd", "OpLoopMerge"};
+  test.required_spirv = {"Coherent", "OpAtomicLoad", "OpAtomicIAdd", "OpLoopMerge"};
   if (store_completion) {
     test.opcodes.push_back(O::S_WAITCNT_VSCNT);
     test.opcodes.push_back(O::S_LSHL_B64);
-    test.required_spirv.push_back("OpControlBarrier %uint_3 %uint_1 %uint_2116");
+    test.required_spirv.push_back("OpMemoryBarrier %uint_3 %uint_2116");
   }
   test.compute_info.threads_num[0] = wave_size;
   test.compute_info.threads_num[1] = 1;
@@ -47814,9 +47814,9 @@ TestCase ImageAtomicCompareSwapGlcAndExec() {
   test.storage_image_r32ui[6] = 0xdeadbeefu;
   test.expected_storage_image_r32ui = test.storage_image_r32ui;
   test.expected_storage_image_r32ui[6] = 0xabcdef01u;
-  // Device scope, AcquireRelease | ImageMemory (0x808).
+  // Subgroup scope, AcquireRelease | ImageMemory (0x808).
   test.required_spirv = {"OpAtomicCompareExchange", "OpImageTexelPointer",
-                         "OpMemoryBarrier %uint_1 %uint_2056"};
+                         "OpMemoryBarrier %uint_3 %uint_2056"};
   return test;
 }
 

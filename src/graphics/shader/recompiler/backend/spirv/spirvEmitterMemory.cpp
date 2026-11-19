@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdio>
+#include <cstdlib>
 #include <utility>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
@@ -461,6 +463,13 @@ uint32_t LoadWordInBounds(ValueEmitContext& ctx, const MemoryResourceAccess& res
                           uint32_t index) {
 	const auto value   = ctx.state.builder.AllocateId();
 	const auto pointer = EmitMemoryElementPointer(ctx.state, resource, index);
+	// A glc load is a device-scope relaxed atomic load: AMD's Windows driver keeps a Volatile load
+	// out of a loop that waits for another workgroup's flag, so a decoupled look-back never sees it.
+	if (resource.memory_access != spv::MemoryAccessMaskNone) {
+		ctx.state.builder.AddFunction(spv::OpAtomicLoad, TypeU32(ctx.state), value, pointer,
+		                              ConstantU32(ctx.state, spv::ScopeDevice), ConstantU32(ctx.state, 0u));
+		return value;
+	}
 	ctx.state.builder.AddFunction(spv::OpLoad, TypeU32(ctx.state), value, pointer,
 	                              resource.memory_access);
 	return value;

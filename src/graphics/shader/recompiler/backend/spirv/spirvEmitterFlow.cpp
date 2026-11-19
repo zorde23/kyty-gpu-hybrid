@@ -2,6 +2,9 @@
 
 #include "common/logging/log.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <string_view>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -731,9 +734,26 @@ uint32_t EmitIdentity(ValueEmitContext&, uint32_t value) {
 void EmitVoid(ValueEmitContext&) {}
 
 void EmitStoreCompletion(EmitterState& state) {
+	// The wave waits for its own stores (S_WAITCNT VSCNT); a workgroup or device scope makes AMD's
+	// Windows driver emit an s_barrier, which waves in a divergent loop never all reach.
+	// KYTY_STORE_COMPLETION=legacy (diagnosis) emits the old subgroup control barrier with device memory.
+	static const bool legacy = [] {
+		const char* value = std::getenv("KYTY_STORE_COMPLETION");
+		const bool  on    = value != nullptr && std::string_view(value) == "legacy";
+		if (on) {
+			std::fprintf(stderr, "[kyty-gpu] KYTY_STORE_COMPLETION=legacy\n");
+		}
+		return on;
+	}();
+	if (legacy) {
+		state.builder.AddFunction(
+		    spv::OpControlBarrier, ConstantU32(state, spv::ScopeSubgroup), ConstantU32(state, spv::ScopeDevice),
+		    ConstantU32(state, spv::MemorySemanticsReleaseMask | spv::MemorySemanticsUniformMemoryMask |
+		                          spv::MemorySemanticsImageMemoryMask));
+		return;
+	}
 	state.builder.AddFunction(
-	    spv::OpControlBarrier, ConstantU32(state, spv::ScopeSubgroup),
-	    ConstantU32(state, spv::ScopeDevice),
+	    spv::OpMemoryBarrier, ConstantU32(state, spv::ScopeSubgroup),
 	    ConstantU32(state, spv::MemorySemanticsReleaseMask | spv::MemorySemanticsUniformMemoryMask |
 	                          spv::MemorySemanticsImageMemoryMask));
 }
