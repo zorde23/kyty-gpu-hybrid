@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cstdio>
 #include <cstring>
 #include <deque>
 #include <map>
@@ -192,8 +193,19 @@ thread_local std::array<WalkerPageAnswer, 4> t_page_answers;
 // Bit 32 set: the low dword is the value at the address; clear: load it directly.
 uint64_t KYTY_SYSV_ABI ProbeGuestLoad(uint64_t address) {
 	constexpr uint64_t PageSize = 4096;
-	if (address < GuestMemoryStart || !g_guest_memory_set.load(std::memory_order_acquire)) {
+	if (!g_guest_memory_set.load(std::memory_order_acquire)) {
 		return 0;
+	}
+	if (address < GuestMemoryStart) {
+		// A null table reads zero here: in the hybrid, the executable's fault handler only passes
+		// faults in donated guest memory to Kyty, so a direct load of it would end the title.
+		// Counted, at each power of two, so a growing number of them stays visible.
+		static std::atomic<uint64_t> null_loads {0};
+		if (const auto count = null_loads.fetch_add(1, std::memory_order_relaxed) + 1; (count & (count - 1)) == 0) {
+			std::fprintf(stderr, "[kyty-gpu] SRT walker: %llu loads of a null table read as zero (last 0x%llx)\n",
+			             static_cast<unsigned long long>(count), static_cast<unsigned long long>(address));
+		}
+		return uint64_t {1} << 32u;
 	}
 	const auto page   = address & ~(PageSize - 1);
 	auto&      answer = t_page_answers[(page / PageSize) % t_page_answers.size()];
@@ -209,6 +221,10 @@ uint64_t KYTY_SYSV_ABI ProbeGuestLoad(uint64_t address) {
 			std::memcpy(&value, answer.backing + (address - page), sizeof(value));
 			return uint64_t {1} << 32u | value;
 		case SrtWalkerPage::PerLoad: break;
+		case SrtWalkerPage::Unmapped:
+			// As a faulting load: zero, and a walk ahead fails.
+			if (t_walker_ahead) t_walker_faulted = true;
+			return uint64_t {1} << 32u;
 	}
 	return g_guest_memory.read(address, value, t_walker_ahead, answer.backing)
 	           ? uint64_t {1} << 32u | value

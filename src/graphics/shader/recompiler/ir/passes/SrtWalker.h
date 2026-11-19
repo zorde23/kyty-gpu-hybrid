@@ -130,13 +130,13 @@ bool WalkedActive(const ResourcePlan& plan, uint32_t source);
 bool WalkedImageActive(const ResourcePlan& plan, uint32_t image);
 // How walker loads read a 4 KiB guest page: directly, from bytes the emulator points to, or by
 // asking the emulator for each dword.
-enum class SrtWalkerPage : uint8_t { Direct, Backing, PerLoad };
+enum class SrtWalkerPage : uint8_t { Direct, Backing, PerLoad, Unmapped };
 // Set by the emulator; without it every load is direct. `ahead` tells a walk ahead of execution.
 struct SrtWalkerGuestMemory {
 	// The page holding `address`: Direct when a direct load reads it right (or faults as it
 	// should), Backing when `backing` points to the bytes every load must read, PerLoad otherwise
-	// (`backing` may then point to page bytes for `read`). The answer holds for the rest of the
-	// walk.
+	// (`backing` may then point to page bytes for `read`), Unmapped when no load may touch it (its
+	// loads read zero, and a walk ahead fails). The answer holds for the rest of the walk.
 	SrtWalkerPage (*page)(uint64_t address, bool ahead, const uint8_t*& backing) = nullptr;
 	// Reads the dword at an address of a PerLoad page that a direct load may fault on (a page the
 	// GPU owns), without faulting; false when the walker should load it directly.

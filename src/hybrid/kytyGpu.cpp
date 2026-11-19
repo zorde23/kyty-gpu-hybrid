@@ -33,6 +33,11 @@
 #include <windows.h> // IWYU pragma: keep
 #endif
 
+namespace Loader {
+void HybridInitWalker();
+bool HybridHandleFault(uint64_t vaddr, uint32_t access, uint64_t rip, void* native_context);
+} // namespace Loader
+
 namespace Libs {
 LIB_DEFINE(InitAgcDriver_1);
 LIB_DEFINE(InitPad_1);
@@ -173,6 +178,9 @@ extern "C" __declspec(dllexport) void kyty_gpu_init(const Aps5Host* host) {
 			    subsystems.Initialize<Profiler::Lifecycle>();
 			    KYTY_PROFILER_THREAD("Thread_KytyMain");
 			    subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
+			    // The SRT walker asks Kyty before each guest load, as in pure Kyty: the executable passes
+			    // only faults in donated memory on, so a walker load must not rely on faulting.
+			    Loader::HybridInitWalker();
 			    subsystems.Initialize<Libs::Controller::Lifecycle>();
 			    LoadTitleForPipelineCache();
 			    subsystems.Initialize<Libs::Graphics::Lifecycle>();
@@ -235,10 +243,6 @@ extern "C" __declspec(dllexport) void kyty_gpu_on_section_closed(void* section) 
 	    },
 	    false);
 }
-
-namespace Loader {
-bool HybridHandleFault(uint64_t vaddr, uint32_t access, uint64_t rip, void* native_context);
-} // namespace Loader
 
 // Called from inside the executable's vectored handler: must not allocate or lock what the faulting thread
 // may hold.

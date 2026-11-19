@@ -2315,6 +2315,31 @@ void* RuntimeLinker::ApplicationHeapMalloc(uint64_t size) {
 
 namespace Loader {
 
+void HybridInitWalker() {
+	// The executable's handler does not pass Kyty a fault outside donated memory, so a direct walker
+	// load of an unmapped page (a table pointer built from garbage) would end the title: as pure
+	// Kyty's fault handler completes such loads, they read zero and a walk ahead fails.
+	static const auto page = [](uint64_t address, bool ahead, const uint8_t*& backing) {
+		using Libs::Graphics::ShaderRecompiler::IR::SrtWalkerPage;
+		const auto kind = WalkerGuestPage(address, ahead, backing);
+		if (kind == SrtWalkerPage::Direct && !Libs::LibKernel::Memory::IsBackingReadable(address & ~uint64_t {4095}, 4096)) {
+			// Counted, at each power of two, so frequent garbage V#s stay visible.
+			static std::atomic<uint64_t> unmapped {0};
+			static std::atomic<uint64_t> first {0};
+			uint64_t                     none = 0;
+			first.compare_exchange_strong(none, address, std::memory_order_relaxed);
+			if (const auto count = unmapped.fetch_add(1, std::memory_order_relaxed) + 1; (count & (count - 1)) == 0) {
+				std::fprintf(stderr, "[kyty-gpu] SRT walker: %llu unmapped pages read as zero (first 0x%llx, last 0x%llx)\n",
+				             static_cast<unsigned long long>(count), static_cast<unsigned long long>(first.load()),
+				             static_cast<unsigned long long>(address));
+			}
+			return SrtWalkerPage::Unmapped;
+		}
+		return kind;
+	};
+	Libs::Graphics::ShaderRecompiler::IR::SetSrtWalkerGuestMemory({.page = page, .read = ReadWalkerGuestMemory});
+}
+
 // The hybrid: the AnyPS5 executable's vectored handler offers an access violation on donated memory
 // (access as in EXCEPTION_RECORD: 0 read, 1 write, 8 execute) before handling it itself.
 bool HybridHandleFault(uint64_t vaddr, uint32_t access, uint64_t rip, void* native_context) {
