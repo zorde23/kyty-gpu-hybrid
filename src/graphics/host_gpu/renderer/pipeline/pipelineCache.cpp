@@ -34,6 +34,7 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <cinttypes>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -1741,6 +1742,7 @@ void PipelineCache::RunCompileJob(CompileJob& job, InputInfo& input_info) {
 	std::vector<uint32_t>                             spirv;
 	std::vector<uint32_t>                             plain_spirv;
 	ShaderRecompiler::CompileOptions                  options {.wave_size = input_info.wave_size};
+	bool                                              stale_bytes = false;
 	[&] {
 		const auto user_data = std::span(job.params.user_data).first(job.params.user_data_count);
 		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
@@ -1794,6 +1796,7 @@ void PipelineCache::RunCompileJob(CompileJob& job, InputInfo& input_info) {
 			                                                *specialization)) {
 				specialization.reset();
 			}
+			stale_bytes = reads.MayHaveReadGpuWrites();
 		}
 		if (specialization) {
 			module = BuildModule(job.key, options, std::move(translated), *specialization, {},
@@ -1820,7 +1823,14 @@ void PipelineCache::RunCompileJob(CompileJob& job, InputInfo& input_info) {
 			AddedModule(job.key, entry->second, added, spirv, plain_spirv, options, job.params.code,
 			            job.push_data_cursor);
 			if constexpr (std::is_same_v<InputInfo, ShaderComputeInputInfo>) {
-				if (!m_async_threads.empty()) {
+				// A specialization from stale bytes of GPU-written memory is usually one no dispatch
+				// asks for (an empty V# the GPU had not written yet), and the AMD driver crashed
+				// compiling one: its pipeline waits for a dispatch.
+				if (stale_bytes && std::getenv("KYTY_HYB_PIPELINE_LOG") != nullptr) {
+					std::fprintf(stderr, "[kyty-gpu] no pipeline ahead for cs %016" PRIx64 " module %016" PRIx64 " (stale bytes)\n",
+					             added.info.shader_hash, added.id);
+				}
+				if (!m_async_threads.empty() && !stale_bytes) {
 					CreateComputePipelineAhead(added);
 				}
 			}
