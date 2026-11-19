@@ -23,6 +23,23 @@
 #include <cinttypes>
 #include <span>
 #include <vector>
+#include <cstdlib>
+#include <cstdio>
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+extern "C" __declspec(dllimport) unsigned long __stdcall GetCurrentThreadId();
+#endif
+
+namespace {
+// The id a crash report names the thread by.
+unsigned long CurrentThreadId() {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	return GetCurrentThreadId();
+#else
+	return 0;
+#endif
+}
+} // namespace
 
 namespace Libs::Graphics {
 
@@ -378,6 +395,14 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	pipeline_info.pDynamicState       = &dynamic_state;
 	pipeline_info.layout              = pipeline.pipeline_layout;
 
+	if (PipelineLogEnabled()) {
+		const auto hash = [&](size_t stage) {
+			return stages[stage] != nullptr ? stages[stage]->info.shader_hash : uint64_t {0};
+		};
+		std::fprintf(stderr, "[kyty-gpu] creating pipeline (thread %lu) %s %016" PRIx64 " hs %016" PRIx64 " ds %016" PRIx64
+		                     " ps %016" PRIx64 "\n",
+		             CurrentThreadId(), mesh ? "ms" : "vs", hash(0), hash(1), hash(2), hash(3));
+	}
 	const auto result = graphics.device.createGraphicsPipelines(driver_cache, 1, &pipeline_info,
 	                                                            nullptr, &pipeline.pipeline);
 	if (result != vk::Result::eSuccess) {
@@ -428,6 +453,10 @@ void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& p
 	info.stage  = comp_shader_stage_info;
 	info.layout = pipeline.pipeline_layout;
 
+	if (PipelineLogEnabled()) {
+		std::fprintf(stderr, "[kyty-gpu] creating pipeline (thread %lu) cs %016" PRIx64 " module %016" PRIx64 "\n",
+		             CurrentThreadId(), module.info.shader_hash, module.id);
+	}
 	const auto result =
 	    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline.pipeline);
 	if (result != vk::Result::eSuccess) {

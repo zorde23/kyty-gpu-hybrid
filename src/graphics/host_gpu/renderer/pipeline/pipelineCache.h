@@ -35,6 +35,10 @@
 
 namespace Libs::Graphics {
 
+// KYTY_HYB_PIPELINE_LOG=1 (diagnosis): logs pipeline creation, so a driver crash while compiling
+// names its pipeline (the last line of that thread).
+bool PipelineLogEnabled();
+
 // Guest memory that a resolution ahead of execution read. The execution thread repeats the reads
 // before it uses the resolution: guest memory may have changed in between (operations that
 // execute before the draw write it), and ahead of execution GPU-owned bytes cannot be read.

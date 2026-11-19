@@ -53,6 +53,14 @@
 
 namespace Libs::Graphics {
 
+bool PipelineLogEnabled() {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_HYB_PIPELINE_LOG");
+		return value != nullptr && value[0] == '1';
+	}();
+	return enabled;
+}
+
 namespace {
 
 constexpr auto DriverCacheSaveInterval = std::chrono::minutes {1};
@@ -1049,7 +1057,10 @@ PipelineCache::PipelineCache(GraphicContext&                         graphics,
 		m_workers.emplace_back([this] { CompileWorker(); });
 	}
 	if (Config::AsyncPipelinesEnabled()) {
-		constexpr uint32_t AsyncThreads = 3;
+		// Diagnosis only: KYTY_HYB_PIPELINE_THREADS sets how many threads create pipelines ahead.
+		const char*    threads_env  = std::getenv("KYTY_HYB_PIPELINE_THREADS");
+		const uint32_t AsyncThreads =
+		    threads_env != nullptr ? static_cast<uint32_t>(std::clamp(std::atoi(threads_env), 0, 8)) : 3u;
 		for (uint32_t i = 0; i < AsyncThreads; i++) {
 			m_async_threads.emplace_back([this] { AsyncPipelineWorker(); });
 		}
@@ -1088,6 +1099,11 @@ void PipelineCache::InitializeDriverCache() {
 	}
 	if (KYTY_BUILD != KYTY_BUILD_RELEASE) {
 		PipelineCacheLog("Vulkan pipeline cache: disabled (non-Release build)");
+		return;
+	}
+	// Diagnosis only: rules out the driver cache shared by the pipeline threads.
+	if (std::getenv("KYTY_HYB_NO_DRIVER_CACHE") != nullptr) {
+		PipelineCacheLog("Vulkan pipeline cache: disabled (KYTY_HYB_NO_DRIVER_CACHE)");
 		return;
 	}
 	m_driver_cache_path     = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
@@ -1826,7 +1842,7 @@ void PipelineCache::RunCompileJob(CompileJob& job, InputInfo& input_info) {
 				// A specialization from stale bytes of GPU-written memory is usually one no dispatch
 				// asks for (an empty V# the GPU had not written yet), and the AMD driver crashed
 				// compiling one: its pipeline waits for a dispatch.
-				if (stale_bytes && std::getenv("KYTY_HYB_PIPELINE_LOG") != nullptr) {
+				if (stale_bytes && PipelineLogEnabled()) {
 					std::fprintf(stderr, "[kyty-gpu] no pipeline ahead for cs %016" PRIx64 " module %016" PRIx64 " (stale bytes)\n",
 					             added.info.shader_hash, added.id);
 				}
@@ -2333,6 +2349,11 @@ PipelineCache::Pipeline& PipelineCache::GetComputePipeline(const ShaderComputeIn
 
 	if (const auto found = m_compute_pipelines.find(module.id); found != m_compute_pipelines.end()) {
 		return found->second;
+	}
+	// Diagnosis only: which module variants a dispatch really asks for (not a walk ahead).
+	if (PipelineLogEnabled()) {
+		std::fprintf(stderr, "[kyty-gpu] dispatch needs pipeline cs %016" PRIx64 " module %016" PRIx64 "\n",
+		             module.info.shader_hash, module.id);
 	}
 	if (m_async_handoff) {
 		// Dispatches always run: take the pipeline a background thread created, create it here
